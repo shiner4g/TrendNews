@@ -1,0 +1,30 @@
+name: Update TrendNews
+
+on:
+  schedule:
+    - cron: '13 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: trendnews-update
+  cancel-in-progress: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run crawler
+        run: python3 crawl.py
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "trendnews-bot"
+          git config user.email "actions@github.com"
+          git add index.html
+          git diff --cached --quiet || git commit -m "Update TrendNews $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push
