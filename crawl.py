@@ -187,9 +187,11 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   .controls { display: flex; justify-content: center; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 10px; }
   .controls button { border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 6px; padding: 5px 14px; font-size: 14px; cursor: pointer; }
   .controls button:hover { border-color: var(--accent); color: var(--accent); }
-  .font-controls { display: inline-flex; align-items: center; gap: 6px; }
-  .font-controls button { padding: 5px 12px; line-height: 1.4; }
+  .font-controls, .count-controls { display: inline-flex; align-items: center; gap: 6px; }
+  .font-controls button, .count-controls button { padding: 5px 12px; line-height: 1.4; }
   #fontSizeLabel { min-width: 44px; display: inline-block; text-align: center; font-size: 14px; color: var(--text-sub); font-variant-numeric: tabular-nums; }
+  #postCountLabel { min-width: 20px; display: inline-block; text-align: center; font-size: 14px; color: var(--text-sub); font-variant-numeric: tabular-nums; }
+  .count-controls .count-desc { font-size: 14px; color: var(--text-sub); }
 </style>
 </head>
 <body>
@@ -213,6 +215,14 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
       <button id="fontInc" type="button" aria-label="글자 크게">가+</button>
     </span>
   </div>
+  <div class="controls">
+    <span class="count-controls">
+      <span class="count-desc">언론당 기사 개수</span>
+      <span id="postCountLabel">7</span>
+      <button id="postCountDec" type="button" aria-label="기사 개수 줄이기">-</button>
+      <button id="postCountInc" type="button" aria-label="기사 개수 늘리기">+</button>
+    </span>
+  </div>
 </footer>
 <script>
   const COMMUNITY_DATA = __DATA_JSON__;
@@ -223,12 +233,19 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     const FONT_MIN = 12;
     const FONT_MAX = 26;
     const FONT_DEFAULT = 16;
+    const COUNT_KEY = 'communityViewerPostCount';
+    const COUNT_MIN = 1;
+    const COUNT_MAX = 10;
+    const COUNT_DEFAULT = 7;
     const grid = document.getElementById('grid');
     const updatedEl = document.getElementById('updatedAt');
     const resetLink = document.getElementById('resetOrder');
     const fontDecBtn = document.getElementById('fontDec');
     const fontIncBtn = document.getElementById('fontInc');
     const fontSizeLabel = document.getElementById('fontSizeLabel');
+    const postCountLabel = document.getElementById('postCountLabel');
+    const postCountDecBtn = document.getElementById('postCountDec');
+    const postCountIncBtn = document.getElementById('postCountInc');
     const collapseAllBtn = document.getElementById('collapseAll');
     const expandAllBtn = document.getElementById('expandAll');
 
@@ -246,6 +263,20 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     let currentFontSize = setFontSize(getFontSize());
     fontDecBtn.addEventListener('click', function () { currentFontSize = setFontSize(currentFontSize - 1); });
     fontIncBtn.addEventListener('click', function () { currentFontSize = setFontSize(currentFontSize + 1); });
+
+    function getPostCount() {
+      const raw = parseInt(localStorage.getItem(COUNT_KEY), 10);
+      return (!isNaN(raw) && raw >= COUNT_MIN && raw <= COUNT_MAX) ? raw : COUNT_DEFAULT;
+    }
+    function setPostCount(n) {
+      n = Math.max(COUNT_MIN, Math.min(COUNT_MAX, n));
+      try { localStorage.setItem(COUNT_KEY, String(n)); } catch (e) {}
+      postCountLabel.textContent = String(n);
+      return n;
+    }
+    let currentPostCount = setPostCount(getPostCount());
+    postCountDecBtn.addEventListener('click', function () { currentPostCount = setPostCount(currentPostCount - 1); render(); });
+    postCountIncBtn.addEventListener('click', function () { currentPostCount = setPostCount(currentPostCount + 1); render(); });
 
     if (typeof COMMUNITY_DATA === 'undefined' || !COMMUNITY_DATA.communities) { updatedEl.textContent = '데이터가 없습니다.'; return; }
     updatedEl.textContent = '마지막 업데이트: ' + COMMUNITY_DATA.generatedAt;
@@ -364,7 +395,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
           card.appendChild(empty);
         } else {
           const list = document.createElement('ol'); list.className = 'post-list';
-          community.posts.forEach(function (post, idx) {
+          community.posts.slice(0, currentPostCount).forEach(function (post, idx) {
             const li = document.createElement('li');
             li.innerHTML = '<a class="post-title" href="' + escapeAttr(post.url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeAttr(post.title) + '">' + escapeHtml(post.title) + '</a>' + (post.views != null ? '<span class="views">' + post.views + '</span>' : '');
             list.appendChild(li);
