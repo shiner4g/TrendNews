@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TrendNews</title>
+<style>
+  :root { --bg: #f4f5f7; --card-bg: #ffffff; --border: #e3e5e8; --text: #222; --text-sub: #888; --accent: #3b82f6; --badge-bg: #eef2ff; --post-size: 16px; }
+  :root[data-theme="dark"] { --bg: #16181d; --card-bg: #1f2228; --border: #2c2f36; --text: #e6e6e6; --text-sub: #8a8f98; --accent: #6ea8fe; --badge-bg: #1d2740; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #16181d; --card-bg: #1f2228; --border: #2c2f36; --text: #e6e6e6; --text-sub: #8a8f98; --accent: #6ea8fe; --badge-bg: #1d2740; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px 16px 60px; background: var(--bg); color: var(--text); font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI", sans-serif; }
+  header { max-width: 1620px; margin: 0 auto 24px; }
+  .header-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  header h1 { margin: 0; font-size: 20px; letter-spacing: -0.5px; }
+  .header-icons { display: flex; gap: 8px; flex: 0 0 auto; }
+  .icon-btn { border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 6px; width: 34px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; line-height: 1; cursor: pointer; }
+  .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .updated { font-size: 15px; color: var(--text-sub); text-align: center; margin-top: 8px; }
+  .grid { max-width: 1620px; margin: 24px auto 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr)); gap: 18px; }
+  .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; transition: opacity 0.15s, border-color 0.15s; }
+  .card.dragging { opacity: 0.4; }
+  .card.drag-over { border-color: var(--accent); }
+  .card-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; background: color-mix(in srgb, var(--card-bg) 92%, var(--text)); cursor: pointer; }
+  .card-header:hover { background: color-mix(in srgb, var(--card-bg) 85%, var(--text)); }
+  .card-header:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .drag-handle { flex: 0 0 auto; color: var(--text-sub); font-size: 16px; letter-spacing: -1px; user-select: none; cursor: grab; touch-action: none; }
+  .drag-handle:active { cursor: grabbing; }
+  .card-header .title { font-weight: 700; font-size: 18px; color: var(--text); text-decoration: none; }
+  .card-header a.title:hover { color: var(--accent); text-decoration: underline; }
+  .card-header a.title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+  .card-header .board { margin-left: auto; font-size: 15px; color: var(--text-sub); }
+  .toggle-icon { flex: 0 0 auto; color: var(--text-sub); font-size: 14px; padding: 2px 4px; line-height: 1; }
+  .card.collapsed .post-list, .card.collapsed .empty-note { display: none; }
+  ol.post-list { list-style: none; margin: 0; padding: 6px 0; }
+  ol.post-list li { display: flex; align-items: baseline; gap: 8px; padding: 9px 16px; border-bottom: 1px dashed var(--border); }
+  ol.post-list li:last-child { border-bottom: none; }
+  .post-title { flex: 1 1 auto; font-size: var(--post-size); color: var(--text); text-decoration: none; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .post-title:hover { color: var(--accent); text-decoration: underline; }
+  .post-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+  .meta { flex: 0 0 auto; font-size: calc(var(--post-size) - 2px); color: var(--accent); background: var(--badge-bg); border-radius: 10px; padding: 1px 7px; font-weight: 600; min-width: 20px; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .empty-note { padding: 24px 16px; color: var(--text-sub); font-size: 16px; text-align: center; }
+  footer { max-width: 1620px; margin: 36px auto 0; text-align: center; }
+  .controls { display: flex; justify-content: center; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 10px; }
+  .controls button { border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 6px; padding: 5px 14px; font-size: 14px; cursor: pointer; }
+  .controls button:hover { border-color: var(--accent); color: var(--accent); }
+  .font-controls { display: inline-flex; align-items: center; gap: 6px; }
+  .font-controls button { padding: 5px 12px; line-height: 1.4; }
+  #fontSizeLabel { min-width: 44px; display: inline-block; text-align: center; font-size: 14px; color: var(--text-sub); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<header>
+  <div class="header-top">
+    <h1>TrendNews</h1>
+    <div class="header-icons">
+      <button id="collapseAll" type="button" class="icon-btn" title="모두 접기" aria-label="모두 접기">⊟</button>
+      <button id="expandAll" type="button" class="icon-btn" title="모두 펼치기" aria-label="모두 펼치기">⊞</button>
+    </div>
+  </div>
+  <div class="updated" id="updatedAt">불러오는 중...</div>
+</header>
+<div class="grid" id="grid"></div>
+<footer>
+  <div class="controls">
+    <button id="resetOrder" type="button">순서 초기화</button>
+    <span class="font-controls">
+      <span id="fontSizeLabel">16px</span>
+      <button id="fontDec" type="button" aria-label="글자 작게">가-</button>
+      <button id="fontInc" type="button" aria-label="글자 크게">가+</button>
+    </span>
+  </div>
+</footer>
+<script>
+  const NEWS_DATA = {"generatedAt": "2026-10-18 23:55:06 KST", "communities": [{"name": "연합뉴스", "board": "많이 본 뉴스", "posts": [{"title": "기습 폭우에 태풍급 강풍까지…도로 잠기고 가로수 뽑혀", "url": "https://n.news.naver.com/article/001/0016384257?ntype=RANKING", "time": "2시간전"}, {"title": "李대통령 \"'국무회의 공개라 말 못한다'는 거짓말…이해 안 돼\"(종합)", "url": "https://n.news.naver.com/article/001/0016384273?ntype=RANKING", "time": "2시간전"}, {"title": "브런슨 '한국은 DMZ 이남부터' 발언 논란…국방부 \"개인 견해\"", "url": "https://n.news.naver.com/article/001/0016383847?ntype=RANKING", "time": "8시간전"}, {"title": "부산 상어 '부캉이' 지느러미 상처 관찰…누적 방문객 160만명(종합)", "url": "https://n.news.naver.com/article/001/0016384234?ntype=RANKING", "time": "3시간전"}, {"title": "\"메뚜기 잡으러가자\"…지켜지지 못한 소방관 아빠의 약속", "url": "https://n.news.naver.com/article/001/0016383860?ntype=RANKING", "time": "8시간전"}], "error": null, "boardUrl": "https://media.naver.com/press/001/ranking?type=popular"}, {"name": "조선일보", "board": "많이 본 뉴스", "posts": [{"title": "김정은 별장 인근서 포착된 80m 레저 선박, 안에 수영장도", "url": "https://n.news.naver.com/article/023/0004004490?ntype=RANKING", "time": "6시간전"}, {"title": "‘재정 빨대’ 후폭풍… 경기도지사 집무실로 빨대 250개 쏟아졌다", "url": "https://n.news.naver.com/article/023/0004004491?ntype=RANKING", "time": "6시간전"}, {"title": "사람 잡는 日 마쓰리... 대형 가마 깔려 현직 부시장 사망", "url": "https://n.news.naver.com/article/023/0004004487?ntype=RANKING", "time": "6시간전"}, {"title": "집주인 대출이자 66% 늘 때… 전세 세입자 이자 144% 폭증", "url": "https://n.news.naver.com/article/023/0004004431?ntype=RANKING", "time": "14시간전"}, {"title": "“이사장 책임지라” 했는데 회장이 사퇴… ‘응급실 뺑뺑이 방지법’에 의료계 내홍", "url": "https://n.news.naver.com/article/023/0004004471?ntype=RANKING", "time": "8시간전"}], "error": null, "boardUrl": "https://media.naver.com/press/023/ranking?type=popular"}, {"name": "중앙일보", "board": "많이 본 뉴스", "posts": [{"title": "물리학자 “주식 몰라도 잘 번다”…로또 당첨금 높이는 비밀", "url": "https://n.news.naver.com/article/025/0003558682?ntype=RANKING", "time": "5시간전"}, {"title": "김민석 무대 등장에 마이크 뺏긴 여가수 “어떤 상황에서도 최선”", "url": "https://n.news.naver.com/article/025/0003558690?ntype=RANKING", "time": "4시간전"}, {"title": "부캉이, 부산 한달살이 끝?…“목요일 나갈 수도” 콕 짚은 전문가", "url": "https://n.news.naver.com/article/025/0003558635?ntype=RANKING", "time": "10시간전"}, {"title": "넉살 “이 나라 정신 못 차리고 있어”…출산지원금에 발끈, 왜", "url": "https://n.news.naver.com/article/025/0003558636?ntype=RANKING", "time": "10시간전"}, {"title": "“나보다 언플 잘해” 한동훈 아낀 尹…쌍욕 전화 부른 그 사건", "url": "https://n.news.naver.com/article/025/0003558639?ntype=RANKING", "time": "10시간전"}], "error": null, "boardUrl": "https://media.naver.com/press/025/ranking?type=popular"}, {"name": "한겨레", "board": "많이 본 뉴스", "posts": [{"title": "홍준표 “조희대 탄핵하면 윤석열 석방…재판 정지→구속기간 만료”", "url": "https://n.news.naver.com/article/028/0002827930?ntype=RANKING", "time": "8시간전"}, {"title": "아빠 빈소에, 아빠랑 잡은 메뚜기 상자 안고…7살 딸 “꼭 다시 만나”", "url": "https://n.news.naver.com/article/028/0002827933?ntype=RANKING", "time": "8시간전"}, {"title": "‘소방 빨대’ 추미애 뒤늦은 사과…징계 연대청원까지 민주당 악재", "url": "https://n.news.naver.com/article/028/0002827958?ntype=RANKING", "time": "6시간전"}, {"title": "숙취로 이틀을 지웠던 ‘전설의 술’…‘캪틴큐‘가 돌아왔다", "url": "https://n.news.naver.com/article/028/0002827925?ntype=RANKING", "time": "9시간전"}, {"title": "국가직 소방, 재정은 지방…추미애 “빨대” 충격파에 드러난 ‘이중 구조’ [뉴스분석]", "url": "https://n.news.naver.com/article/028/0002827987?ntype=RANKING", "time": "3시간전"}], "error": null, "boardUrl": "https://media.naver.com/press/028/ranking?type=popular"}, {"name": "경향신문", "board": "많이 본 뉴스", "posts": [{"title": "‘청년 대통령’ 마크롱의 씁쓸한 말로···프랑스 청년들, 임기말 거리로", "url": "https://n.news.naver.com/article/032/0003476943?ntype=RANKING", "time": "7시간전"}, {"title": "혈당까지 잡는 ‘마그네슘’…제일 많이 든 제철 견과류는?", "url": "https://n.news.naver.com/article/032/0003476904?ntype=RANKING", "time": "10시간전"}, {"title": "“5년 걸린 농사, 이제 원리금 갚아야 하는데”···포도값 폭락에 귀농인은 세상을 떠났다", "url": "https://n.news.naver.com/article/032/0003476958?ntype=RANKING", "time": "6시간전"}, {"title": "물에 잠길 뻔한 ‘700년 된 은행나무’ 이 한그루를 살리기 위해 내린 결정은···경북 가을 명소에 담긴 이야기", "url": "https://n.news.naver.com/article/032/0003476902?ntype=RANKING", "time": "11시간전"}, {"title": "‘추풍’에 ‘낙엽’ 될라…민주당 전전긍긍", "url": "https://n.news.naver.com/article/032/0003477037?ntype=RANKING", "time": "2시간전"}], "error": null, "boardUrl": "https://media.naver.com/press/032/ranking?type=popular"}, {"name": "YTN", "board": "많이 본 뉴스", "posts": [{"title": "원·달러 환율 2년 만에 최저...반도체 훈풍 영향", "url": "https://n.news.naver.com/article/052/0002420342?ntype=RANKING", "time": "4시간전"}, {"title": "가던 길 멈춘 시민들...폭우 속 선행 '눈길 [제보영상]", "url": "https://n.news.naver.com/article/052/0002420341?ntype=RANKING", "time": "5시간전"}, {"title": "초진 비대면진료, 같은 시도에서만...\"비만치료제 불가\"", "url": "https://n.news.naver.com/article/052/0002420335?ntype=RANKING", "time": "5시간전"}, {"title": "\"나중에 꼭 다시 만나요\"...영정 앞에 6살 딸이 쓴 편지", "url": "https://n.news.naver.com/article/052/0002420319?ntype=RANKING", "time": "5시간전"}, {"title": "'8명 사상' 부천 화재 수사 속도...공장 대표 입건", "url": "https://n.news.naver.com/article/052/0002420343?ntype=RANKING", "time": "4시간전"}], "error": null, "boardUrl": "https://media.naver.com/press/052/ranking?type=popular"}, {"name": "SBS", "board": "많이 본 뉴스", "posts": [{"title": "\"벽에 너무 붙더니\"…'부산 한달살이' 부캉이 또 상처", "url": "https://n.news.naver.com/article/055/0001396330?ntype=RANKING", "time": "7시간전"}, {"title": "배수구 막혀 불어났다…나무 꺾이고 교회 첨탑 '쾅' (풀영상)", "url": "https://n.news.naver.com/article/055/0001396348?ntype=RANKING", "time": "3시간전"}, {"title": "[단독] \"공짜는 낡은 한복뿐\"…모델 선발부터 비리 얼룩", "url": "https://n.news.naver.com/article/055/0001396358?ntype=RANKING", "time": "3시간전"}, {"title": "추미애 사과에도 파장 계속…김민석 '공연 중단' 사과", "url": "https://n.news.naver.com/article/055/0001396351?ntype=RANKING", "time": "3시간전"}, {"title": "\"누가 허락했나\" 포스터 뜯겼다…주민 눈치보는 학생들", "url": "https://n.news.naver.com/article/055/0001396355?ntype=RANKING", "time": "3시간전"}], "error": null, "boardUrl": "https://media.naver.com/press/055/ranking?type=popular"}, {"name": "KBS", "board": "많이 본 뉴스", "posts": [{"title": "조문 정국 속 ‘추미애 발언’ 후폭풍…“사퇴 바란다”·“소방 재정 챙길 것”", "url": "https://n.news.naver.com/article/056/0012275836?ntype=RANKING", "time": "2시간전"}, {"title": "강풍에 뜯겨 날아간 아파트 지붕…도로를 막은 쓰러진 나무", "url": "https://n.news.naver.com/article/056/0012275837?ntype=RANKING", "time": "2시간전"}, {"title": "브런슨 ‘한국은 DMZ 이남부터’ 논란…유엔사 “한국 주권 의문 여지 없어”", "url": "https://n.news.naver.com/article/056/0012275841?ntype=RANKING", "time": "2시간전"}, {"title": "‘부천 공장 화재’ 순직 소방관 조문 잇따라…공장 대표 ‘입건’", "url": "https://n.news.naver.com/article/056/0012275834?ntype=RANKING", "time": "2시간전"}, {"title": "[뉴스9 날씨] 내일 아침 서울 11도 쌀쌀…오전까지 남부 비", "url": "https://n.news.naver.com/article/056/0012275870?ntype=RANKING", "time": "2시간전"}], "error": null, "boardUrl": "https://media.naver.com/press/056/ranking?type=popular"}, {"name": "MBC", "board": "많이 본 뉴스", "posts": [{"title": "풍속 200km/h '슈퍼태풍' 참피‥일제히 '대만행 예측' 초비상", "url": "https://n.news.naver.com/article/214/0001529772?ntype=RANKING", "time": "5시간전"}, {"title": "갑자기 무대에 김민석이? '과잉 의전' 논란에 \"죄송\"", "url": "https://n.news.naver.com/article/214/0001529779?ntype=RANKING", "time": "3시간전"}, {"title": "전국 요란한 가을비‥비 그치면 기온 뚝", "url": "https://n.news.naver.com/article/214/0001529776?ntype=RANKING", "time": "3시간전"}, {"title": "[스트레이트] 5공 청산의 사각지대‥'허화평 재단'의 비밀", "url": "https://n.news.naver.com/article/214/0001529800?ntype=RANKING", "time": "2시간전"}, {"title": "[단독] 뭉칫돈에 제설기까지‥대학에 돈 뿌린 이유", "url": "https://n.news.naver.com/article/214/0001529783?ntype=RANKING", "time": "3시간전"}], "error": null, "boardUrl": "https://media.naver.com/press/214/ranking?type=popular"}, {"name": "JTBC", "board": "많이 본 뉴스", "posts": [{"title": "[인터뷰｜풀버전] BTS 정국 커버에 놀란 벤슨 분…\"멤버들 만나고파\"", "url": "https://n.news.naver.com/article/437/0000516272?ntype=RANKING", "time": "4시간전"}, {"title": "추미애 \"사과하라니 사과하겠다\" 후폭풍…여권서도 지적", "url": "https://n.news.naver.com/article/437/0000516274?ntype=RANKING", "time": "4시간전"}, {"title": "[단독]중수청 '1호' 구속영장 발부…'대마 밀수범' 인지해 첫 구속", "url": "https://n.news.naver.com/article/437/0000516277?ntype=RANKING", "time": "3시간전"}, {"title": "아빠 영정 앞 \"꼭 다시 만나요\"…딸이 전한 마지막 인사", "url": "https://n.news.naver.com/article/437/0000516280?ntype=RANKING", "time": "3시간전"}, {"title": "브런슨, 이번엔 '선 넘었다'…'영토 주권' 발언 논란 확산", "url": "https://n.news.naver.com/article/437/0000516276?ntype=RANKING", "time": "4시간전"}], "error": null, "boardUrl": "https://media.naver.com/press/437/ranking?type=popular"}]};
+  (function () {
+    const STORAGE_KEY = 'trendNewsOrder';
+    const COLLAPSE_KEY = 'trendNewsCollapsed';
+    const FONT_KEY = 'trendNewsFontSize';
+    const FONT_MIN = 12;
+    const FONT_MAX = 26;
+    const FONT_DEFAULT = 16;
+    const grid = document.getElementById('grid');
+    const updatedEl = document.getElementById('updatedAt');
+    const resetLink = document.getElementById('resetOrder');
+    const fontDecBtn = document.getElementById('fontDec');
+    const fontIncBtn = document.getElementById('fontInc');
+    const fontSizeLabel = document.getElementById('fontSizeLabel');
+    const collapseAllBtn = document.getElementById('collapseAll');
+    const expandAllBtn = document.getElementById('expandAll');
+
+    function getFontSize() {
+      const raw = parseInt(localStorage.getItem(FONT_KEY), 10);
+      return (!isNaN(raw) && raw >= FONT_MIN && raw <= FONT_MAX) ? raw : FONT_DEFAULT;
+    }
+    function setFontSize(px) {
+      px = Math.max(FONT_MIN, Math.min(FONT_MAX, px));
+      document.documentElement.style.setProperty('--post-size', px + 'px');
+      try { localStorage.setItem(FONT_KEY, String(px)); } catch (e) {}
+      fontSizeLabel.textContent = px + 'px';
+      return px;
+    }
+    let currentFontSize = setFontSize(getFontSize());
+    fontDecBtn.addEventListener('click', function () { currentFontSize = setFontSize(currentFontSize - 1); });
+    fontIncBtn.addEventListener('click', function () { currentFontSize = setFontSize(currentFontSize + 1); });
+
+    if (typeof NEWS_DATA === 'undefined' || !NEWS_DATA.communities) { updatedEl.textContent = '데이터가 없습니다.'; return; }
+    updatedEl.textContent = '마지막 업데이트: ' + NEWS_DATA.generatedAt;
+    function getSavedOrder() { try { const raw = localStorage.getItem(STORAGE_KEY); const arr = raw ? JSON.parse(raw) : null; return Array.isArray(arr) ? arr : null; } catch (e) { return null; } }
+    function saveOrder(names) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(names)); } catch (e) {} }
+    function applyOrder(communities, order) {
+      if (!order) return communities.slice();
+      const byName = {}; communities.forEach(function (c) { byName[c.name] = c; });
+      const ordered = [];
+      order.forEach(function (name) { if (byName[name]) { ordered.push(byName[name]); delete byName[name]; } });
+      communities.forEach(function (c) { if (byName[c.name]) ordered.push(c); });
+      return ordered;
+    }
+    function getCollapsedSet() {
+      try {
+        const raw = localStorage.getItem(COLLAPSE_KEY);
+        const arr = raw ? JSON.parse(raw) : [];
+        return new Set(Array.isArray(arr) ? arr : []);
+      } catch (e) { return new Set(); }
+    }
+    function saveCollapsedSet(set) { try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(Array.from(set))); } catch (e) {} }
+    const collapsedSet = getCollapsedSet();
+
+    let currentOrder = applyOrder(NEWS_DATA.communities, getSavedOrder());
+    resetLink.addEventListener('click', function (e) { e.preventDefault(); localStorage.removeItem(STORAGE_KEY); currentOrder = NEWS_DATA.communities.slice(); render(); });
+
+    collapseAllBtn.addEventListener('click', function () {
+      currentOrder.forEach(function (c) { collapsedSet.add(c.name); });
+      saveCollapsedSet(collapsedSet);
+      render();
+    });
+    expandAllBtn.addEventListener('click', function () {
+      collapsedSet.clear();
+      saveCollapsedSet(collapsedSet);
+      render();
+    });
+
+    // ---------- drag-to-reorder (Pointer Events, not native HTML5 DnD) ----------
+    let dragSrcIndex = null;
+    let dragActive = false;
+
+    function attachDragHandle(handle, card, index) {
+      handle.style.touchAction = 'none';
+      handle.addEventListener('pointerdown', function (e) {
+        dragSrcIndex = index;
+        dragActive = true;
+        card.classList.add('dragging');
+        try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+      });
+      handle.addEventListener('pointermove', function (e) {
+        if (!dragActive) return;
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        const targetCard = el && el.closest ? el.closest('.card') : null;
+        Array.from(grid.querySelectorAll('.card.drag-over')).forEach(function (c) { c.classList.remove('drag-over'); });
+        if (targetCard && targetCard !== card) targetCard.classList.add('drag-over');
+      });
+      function endDrag(e) {
+        if (!dragActive) return;
+        dragActive = false;
+        card.classList.remove('dragging');
+        Array.from(grid.querySelectorAll('.card.drag-over')).forEach(function (c) { c.classList.remove('drag-over'); });
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        const targetCard = el && el.closest ? el.closest('.card') : null;
+        if (targetCard && targetCard !== card) {
+          const targetIndex = Array.from(grid.children).indexOf(targetCard);
+          if (dragSrcIndex !== null && targetIndex !== -1 && targetIndex !== dragSrcIndex) {
+            const reordered = currentOrder.slice();
+            const moved = reordered.splice(dragSrcIndex, 1)[0];
+            reordered.splice(targetIndex, 0, moved);
+            currentOrder = reordered;
+            saveOrder(currentOrder.map(function (c) { return c.name; }));
+            render();
+          }
+        }
+        dragSrcIndex = null;
+      }
+      handle.addEventListener('pointerup', endDrag);
+      handle.addEventListener('pointercancel', endDrag);
+    }
+
+    function render() {
+      grid.innerHTML = '';
+      currentOrder.forEach(function (community, index) {
+        const card = document.createElement('div'); card.className = 'card';
+        const isCollapsed = collapsedSet.has(community.name);
+        if (isCollapsed) card.classList.add('collapsed');
+
+        const header = document.createElement('div'); header.className = 'card-header';
+        header.setAttribute('role', 'button');
+        header.setAttribute('tabindex', '0');
+        header.setAttribute('aria-expanded', String(!isCollapsed));
+        header.innerHTML = '<span class="drag-handle" aria-hidden="true">⠿</span>' + (community.boardUrl ? '<a class="title" href="' + escapeAttr(community.boardUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(community.name) + '</a>' : '<span class="title">' + escapeHtml(community.name) + '</span>') + '<span class="board">' + escapeHtml(community.board || '') + (community.stale ? ' · 캐시' : '') + '</span><span class="toggle-icon" aria-hidden="true">' + (isCollapsed ? '▸' : '▾') + '</span>';
+        card.appendChild(header);
+
+        attachDragHandle(header.querySelector('.drag-handle'), card, index);
+
+        const toggleIcon = header.querySelector('.toggle-icon');
+        function toggleCollapse() {
+          const nowCollapsed = card.classList.toggle('collapsed');
+          if (nowCollapsed) { collapsedSet.add(community.name); } else { collapsedSet.delete(community.name); }
+          saveCollapsedSet(collapsedSet);
+          toggleIcon.textContent = nowCollapsed ? '▸' : '▾';
+          header.setAttribute('aria-expanded', String(!nowCollapsed));
+        }
+        header.addEventListener('click', function (e) {
+          if (e.target.closest('.drag-handle') || e.target.closest('.title')) return;
+          toggleCollapse();
+        });
+        header.addEventListener('keydown', function (e) {
+          if (e.target.closest('.drag-handle') || e.target.closest('.title')) return;
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCollapse(); }
+        });
+        if (!community.posts || community.posts.length === 0) {
+          const empty = document.createElement('div'); empty.className = 'empty-note';
+          empty.textContent = community.error ? ('불러오지 못했습니다 (' + community.error + ')') : '표시할 뉴스가 없습니다.';
+          card.appendChild(empty);
+        } else {
+          const list = document.createElement('ol'); list.className = 'post-list';
+          community.posts.forEach(function (post, idx) {
+            const li = document.createElement('li');
+            li.innerHTML = '<a class="post-title" href="' + escapeAttr(post.url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeAttr(post.title) + '">' + escapeHtml(post.title) + '</a><span class="meta">' + escapeHtml(post.time || '') + '</span>';
+            list.appendChild(li);
+          });
+          card.appendChild(list);
+        }
+        grid.appendChild(card);
+      });
+    }
+    render();
+    function escapeHtml(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function escapeAttr(s) { return escapeHtml(s).replace(/"/g, '&quot;'); }
+  })();
+</script>
+</body>
+</html>
