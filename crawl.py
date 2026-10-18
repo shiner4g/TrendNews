@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 # TrendNews crawler + page builder — run by .github/workflows/update.yml
-# TrendBoard(커뮤니티 버전)의 뉴스 버전. 국내 주요 언론사 10곳의 "많이 본 뉴스"
-# TOP5를 한 화면에 모아 보여줌.
+# TrendBoard(커뮤니티 버전)의 뉴스 버전. 국내 언론사 9곳의 "많이 본 뉴스" TOP10을
+# 한 화면에 모아 보여줌 - 구조/코드는 TrendBoard의 crawl.py를 그대로 가져왔음.
 #
-# 데이터 출처는 네이버뉴스 랭킹 페이지(언론사별 많이 본 뉴스) 하나뿐임:
-# https://news.naver.com/main/ranking/popularDay.naver
-# 이 페이지는 "언론사별로 TOP5"를 미리 랭킹매겨서 보여주는 방식이라(실제 조회수
-# 숫자는 공개하지 않음), TrendBoard처럼 우리가 조회수로 재정렬할 필요가 없음 -
-# 네이버가 이미 매긴 순위를 그대로 씀. 대신 각 기사의 "N시간전" 같은 상대 시각을
-# 뱃지에 표시함 (조회수 자리 대신).
-#
-# 주의: 이 페이지는 EUC-KR 인코딩으로 내려옴 (meta charset="euc-kr") - UTF-8로
-# 읽으면 한글이 깨지니 encoding="euc-kr" 그대로 유지할 것.
+# 데이터 출처: 언론사별 단독 랭킹 페이지
+# (https://media.naver.com/press/<press_id>/ranking?type=popular). 네이버뉴스
+# 메인 랭킹 페이지(news.naver.com/main/ranking/popularDay.naver)는 언론사당 TOP5만
+# 주고 실제 조회수 숫자도 공개를 안 해서(2026-10-18 최초 버전에서 썼다가 발견한
+# 한계), 언론사별 단독 페이지(media.naver.com)로 바꿈 - 이쪽은 TOP10 + 실제 조회수
+# 숫자를 줌. 이 페이지는 UTF-8이고(메인 랭킹 페이지는 EUC-KR이었음), 언론사마다
+# 따로 요청해야 해서 요청 수는 늘었지만(언론사 수만큼), 데이터 품질이 훨씬 좋음.
 
 import urllib.request
 import urllib.parse
@@ -21,26 +19,8 @@ import json
 import datetime
 import os
 
-TOP_N = 5  # 네이버가 언론사당 TOP5까지만 줘서, 이 값을 늘려도 더 나오진 않음
+TOP_N = 10
 OUT_PATH = "index.html"
-
-RANKING_URL = "https://news.naver.com/main/ranking/popularDay.naver"
-
-# 언론사 ID는 네이버뉴스의 고정 press_id (수년간 안 바뀜). 통신사 1 + 지상파/종편
-# 방송 5 + 종합일간지(보수/진보 균형) 4 로 구성 - 특정 성향에 치우치지 않도록
-# 일부러 섞음. 필요하면 이 리스트에 추가/삭제만 하면 됨.
-PRESS_LIST = [
-    {"id": "001", "name": "연합뉴스"},
-    {"id": "023", "name": "조선일보"},
-    {"id": "025", "name": "중앙일보"},
-    {"id": "028", "name": "한겨레"},
-    {"id": "032", "name": "경향신문"},
-    {"id": "052", "name": "YTN"},
-    {"id": "055", "name": "SBS"},
-    {"id": "056", "name": "KBS"},
-    {"id": "214", "name": "MBC"},
-    {"id": "437", "name": "JTBC"},
-]
 
 
 def fetch(url, encoding, method="GET", data=None, extra_headers=None):
@@ -67,34 +47,99 @@ def decode_entities(s):
     return html.unescape(s)
 
 
-def parse_naver_ranking(h):
-    # 페이지 하나에 81개 언론사 박스가 전부 들어있어서, 한 번만 받아 여기서
-    # 언론사별로 쪼갬 (언론사마다 따로 요청하면 같은 페이지를 10번 중복으로 받게 됨).
-    result = {}
-    blocks = h.split('<div class="rankingnews_box">')
-    for block in blocks[1:]:
-        head = block[:600]
-        pid_m = re.search(r"media\.naver\.com/press/(\d+)/ranking", head)
-        if not pid_m:
-            continue
-        press_id = pid_m.group(1)
-        posts = []
-        for m in re.finditer(
-            r'<a href="(https://n\.news\.naver\.com/article/[^"]+)" class="list_title[^"]*"[^>]*>([^<]*)</a>\s*'
-            r'<span class="list_time\s*">([^<]*)</span>',
-            block,
-        ):
-            posts.append(
-                {
-                    "title": decode_entities(m.group(2).strip()),
-                    "url": decode_entities(m.group(1)),
-                    "time": decode_entities(m.group(3).strip()),
-                }
-            )
-        if posts:
-            result[press_id] = posts
-    return result
+def strip_tags(s):
+    return decode_entities(re.sub(r"<[^>]+>", "", s)).strip()
 
+
+def parse_naver_press(h):
+    # 언론사 단독 랭킹 페이지엔 탭(많이 본/댓글 많은/섹션별)마다
+    # <div class="press_ranking_box">가 여러 개 들어있는데, "많이 본 랭킹"이라는
+    # 제목을 가진 블록이 두 개 있음 - 그중 처음 것만 실제 서버 렌더링 데이터이고,
+    # 나중 것은 "{{title}}" 같은 placeholder만 든 JS 템플릿(탭 전환용)이라
+    # 비어있음. 그래서 첫 "많이 본 랭킹" 타이틀 뒤의 <ul class="press_ranking_list">
+    # 안에서만 추출함.
+    idx = h.find(">많이 본 랭킹<")
+    if idx == -1:
+        return []
+    ul_start = h.find('<ul class="press_ranking_list">', idx)
+    if ul_start == -1:
+        return []
+    ul_end = h.find("</ul>", ul_start)
+    section = h[ul_start:ul_end] if ul_end != -1 else h[ul_start : ul_start + 20000]
+    posts = []
+    # 언론사마다 조회수 공개 여부가 다름(일부는 숫자를 아예 안 보여줌) - 그래서
+    # 조회수는 있으면 쓰고 없으면 None으로 둠(0으로 잘못 표시하지 않기 위해).
+    # 어차피 리스트 자체가 이미 네이버가 매긴 순위(1~10위) 순서라서, 조회수 숫자가
+    # 없어도 순서 자체는 정확함.
+    for chunk in section.split('<li class="as_thumb">')[1:]:
+        url_m = re.search(r'<a href="(https://n\.news\.naver\.com/article/[^"]+)" class="_es_pc_link"', chunk)
+        title_m = re.search(r'<strong class="list_title">([\s\S]*?)</strong>', chunk)
+        if not url_m or not title_m:
+            continue
+        views = None
+        view_m = re.search(r'<span class="list_view">\s*<span class="blind">조회수</span>\s*([\d,]+)', chunk)
+        if view_m:
+            views = int(view_m.group(1).replace(",", ""))
+        posts.append(
+            {
+                "title": strip_tags(title_m.group(1)),
+                "url": decode_entities(url_m.group(1)),
+                "comments": 0,
+                "views": views,
+            }
+        )
+    return posts
+
+
+# 언론사 ID는 네이버뉴스의 고정 press_id (수년간 안 바뀜). 통신사/방송/종합지/경제지/
+# 시사주간지/IT전문지를 섞어서 특정 성향에 치우치지 않도록 구성함.
+COMMUNITIES = [
+    {
+        "name": "MBC", "board": "많이 본 뉴스", "encoding": "utf-8", "parse": parse_naver_press,
+        "page_url": lambda n: "https://media.naver.com/press/214/ranking?type=popular",
+        "pages": 1,
+    },
+    {
+        "name": "연합뉴스", "board": "많이 본 뉴스", "encoding": "utf-8", "parse": parse_naver_press,
+        "page_url": lambda n: "https://media.naver.com/press/001/ranking?type=popular",
+        "pages": 1,
+    },
+    {
+        "name": "경향신문", "board": "많이 본 뉴스", "encoding": "utf-8", "parse": parse_naver_press,
+        "page_url": lambda n: "https://media.naver.com/press/032/ranking?type=popular",
+        "pages": 1,
+    },
+    {
+        "name": "한겨레", "board": "많이 본 뉴스", "encoding": "utf-8", "parse": parse_naver_press,
+        "page_url": lambda n: "https://media.naver.com/press/028/ranking?type=popular",
+        "pages": 1,
+    },
+    {
+        "name": "한국일보", "board": "많이 본 뉴스", "encoding": "utf-8", "parse": parse_naver_press,
+        "page_url": lambda n: "https://media.naver.com/press/469/ranking?type=popular",
+        "pages": 1,
+    },
+    {
+        "name": "매일경제", "board": "많이 본 뉴스", "encoding": "utf-8", "parse": parse_naver_press,
+        "page_url": lambda n: "https://media.naver.com/press/009/ranking?type=popular",
+        "pages": 1,
+    },
+    {
+        "name": "중앙일보", "board": "많이 본 뉴스", "encoding": "utf-8", "parse": parse_naver_press,
+        "page_url": lambda n: "https://media.naver.com/press/025/ranking?type=popular",
+        "pages": 1,
+    },
+    {
+        "name": "시사IN", "board": "많이 본 뉴스", "encoding": "utf-8", "parse": parse_naver_press,
+        "page_url": lambda n: "https://media.naver.com/press/308/ranking?type=popular",
+        "pages": 1,
+    },
+    {
+        "name": "전자신문", "board": "많이 본 뉴스", "encoding": "utf-8", "parse": parse_naver_press,
+        "page_url": lambda n: "https://media.naver.com/press/030/ranking?type=popular",
+        "pages": 1,
+    },
+]
 
 PAGE_TEMPLATE = """<!DOCTYPE html>
 <html lang="ko">
@@ -136,7 +181,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   .post-title { flex: 1 1 auto; font-size: var(--post-size); color: var(--text); text-decoration: none; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .post-title:hover { color: var(--accent); text-decoration: underline; }
   .post-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
-  .meta { flex: 0 0 auto; font-size: calc(var(--post-size) - 2px); color: var(--accent); background: var(--badge-bg); border-radius: 10px; padding: 1px 7px; font-weight: 600; min-width: 20px; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .views { flex: 0 0 auto; font-size: calc(var(--post-size) - 2px); color: var(--accent); background: var(--badge-bg); border-radius: 10px; padding: 1px 7px; font-weight: 600; min-width: 20px; text-align: center; font-variant-numeric: tabular-nums; }
   .empty-note { padding: 24px 16px; color: var(--text-sub); font-size: 16px; text-align: center; }
   footer { max-width: 1620px; margin: 36px auto 0; text-align: center; }
   .controls { display: flex; justify-content: center; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 10px; }
@@ -170,11 +215,11 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   </div>
 </footer>
 <script>
-  const NEWS_DATA = __DATA_JSON__;
+  const COMMUNITY_DATA = __DATA_JSON__;
   (function () {
-    const STORAGE_KEY = 'trendNewsOrder';
-    const COLLAPSE_KEY = 'trendNewsCollapsed';
-    const FONT_KEY = 'trendNewsFontSize';
+    const STORAGE_KEY = 'communityViewerOrder';
+    const COLLAPSE_KEY = 'communityViewerCollapsed';
+    const FONT_KEY = 'communityViewerFontSize';
     const FONT_MIN = 12;
     const FONT_MAX = 26;
     const FONT_DEFAULT = 16;
@@ -202,8 +247,8 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     fontDecBtn.addEventListener('click', function () { currentFontSize = setFontSize(currentFontSize - 1); });
     fontIncBtn.addEventListener('click', function () { currentFontSize = setFontSize(currentFontSize + 1); });
 
-    if (typeof NEWS_DATA === 'undefined' || !NEWS_DATA.communities) { updatedEl.textContent = '데이터가 없습니다.'; return; }
-    updatedEl.textContent = '마지막 업데이트: ' + NEWS_DATA.generatedAt;
+    if (typeof COMMUNITY_DATA === 'undefined' || !COMMUNITY_DATA.communities) { updatedEl.textContent = '데이터가 없습니다.'; return; }
+    updatedEl.textContent = '마지막 업데이트: ' + COMMUNITY_DATA.generatedAt;
     function getSavedOrder() { try { const raw = localStorage.getItem(STORAGE_KEY); const arr = raw ? JSON.parse(raw) : null; return Array.isArray(arr) ? arr : null; } catch (e) { return null; } }
     function saveOrder(names) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(names)); } catch (e) {} }
     function applyOrder(communities, order) {
@@ -224,8 +269,8 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     function saveCollapsedSet(set) { try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(Array.from(set))); } catch (e) {} }
     const collapsedSet = getCollapsedSet();
 
-    let currentOrder = applyOrder(NEWS_DATA.communities, getSavedOrder());
-    resetLink.addEventListener('click', function (e) { e.preventDefault(); localStorage.removeItem(STORAGE_KEY); currentOrder = NEWS_DATA.communities.slice(); render(); });
+    let currentOrder = applyOrder(COMMUNITY_DATA.communities, getSavedOrder());
+    resetLink.addEventListener('click', function (e) { e.preventDefault(); localStorage.removeItem(STORAGE_KEY); currentOrder = COMMUNITY_DATA.communities.slice(); render(); });
 
     collapseAllBtn.addEventListener('click', function () {
       currentOrder.forEach(function (c) { collapsedSet.add(c.name); });
@@ -321,7 +366,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
           const list = document.createElement('ol'); list.className = 'post-list';
           community.posts.forEach(function (post, idx) {
             const li = document.createElement('li');
-            li.innerHTML = '<a class="post-title" href="' + escapeAttr(post.url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeAttr(post.title) + '">' + escapeHtml(post.title) + '</a><span class="meta">' + escapeHtml(post.time || '') + '</span>';
+            li.innerHTML = '<a class="post-title" href="' + escapeAttr(post.url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeAttr(post.title) + '">' + escapeHtml(post.title) + '</a>' + (post.views != null ? '<span class="views">' + post.views + '</span>' : '');
             list.appendChild(li);
           });
           card.appendChild(list);
@@ -345,7 +390,7 @@ def load_prev_data():
     try:
         with open(OUT_PATH, "r", encoding="utf-8") as f:
             content = f.read()
-        m = re.search(r"const NEWS_DATA = (\{.*?\});", content, re.S)
+        m = re.search(r"const COMMUNITY_DATA = (\{.*?\});", content, re.S)
         if not m:
             return {}
         data = json.loads(m.group(1))
@@ -357,52 +402,71 @@ def load_prev_data():
 def main():
     prev_by_name = load_prev_data()
 
-    try:
-        html_content = fetch(RANKING_URL, "euc-kr")
-        parsed = parse_naver_ranking(html_content)
-        fetch_error = None
-    except Exception as e:
-        parsed = {}
-        fetch_error = str(e)
-
     result = {
         "generatedAt": (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).strftime("%Y-%m-%d %H:%M:%S") + " KST",
         "communities": [],
     }
 
-    for press in PRESS_LIST:
-        board_url = f"https://media.naver.com/press/{press['id']}/ranking?type=popular"
-        posts = parsed.get(press["id"])
-        if posts:
+    for cfg in COMMUNITIES:
+        try:
+            seen_urls = set()
+            posts = []
+            page_errors = []
+            for page_num in range(1, cfg.get("pages", 1) + 1):
+                page_url = cfg["page_url"](page_num)
+                page_body = cfg.get("page_body", lambda n: None)(page_num)
+                try:
+                    html_content = fetch(
+                        page_url,
+                        cfg["encoding"],
+                        method=cfg.get("fetch_method", "GET"),
+                        data=page_body,
+                        extra_headers=cfg.get("fetch_headers"),
+                    )
+                    page_posts = cfg["parse"](html_content)
+                except Exception as page_e:
+                    page_errors.append(f"page {page_num}: {page_e}")
+                    continue
+                for post in page_posts:
+                    if post["url"] not in seen_urls:
+                        seen_urls.add(post["url"])
+                        posts.append(post)
+            if not posts:
+                raise ValueError(
+                    "no posts parsed - site markup may have changed"
+                    + (f" ({'; '.join(page_errors)})" if page_errors else "")
+                )
+            # 일부 언론사는 조회수를 공개 안 해서 views가 None일 수 있음 - 그런
+            # 경우 0 취급해서 정렬하되(같은 언론사 안에서는 전부 None이라 결과적으로
+            # 원래 네이버 순위 순서가 그대로 유지됨), 화면에 실제로 뿌릴 때는
+            # None을 0으로 바꿔치기하지 않음(아래 JS에서 처리).
+            posts.sort(key=lambda x: x["views"] or 0, reverse=True)
+            top = posts[:TOP_N]
+            board_url = cfg.get("link_url", cfg["page_url"](1))
             result["communities"].append(
-                {
-                    "name": press["name"],
-                    "board": "많이 본 뉴스",
-                    "posts": posts[:TOP_N],
-                    "error": None,
-                    "boardUrl": board_url,
-                }
+                {"name": cfg["name"], "board": cfg["board"], "posts": top, "error": None, "boardUrl": board_url}
             )
-            continue
-        cached = prev_by_name.get(press["name"])
-        if cached and cached.get("posts"):
-            result["communities"].append(
-                {
-                    "name": press["name"],
-                    "board": "많이 본 뉴스",
-                    "posts": cached["posts"],
-                    "error": None,
-                    "stale": True,
-                    "boardUrl": board_url,
-                }
-            )
-        else:
-            err = fetch_error or "해당 언론사 랭킹을 찾지 못함 - 사이트 마크업이 바뀌었을 수 있음"
-            result["communities"].append(
-                {"name": press["name"], "board": "많이 본 뉴스", "posts": [], "error": err, "boardUrl": board_url}
-            )
-        if fetch_error:
-            print(f"[warn] ranking page fetch failed: {fetch_error}")
+            if page_errors:
+                print(f"[warn] {cfg['name']} had partial page failures: {'; '.join(page_errors)}")
+        except Exception as e:
+            board_url = cfg.get("link_url", cfg["page_url"](1))
+            cached = None if cfg.get("no_cache") else prev_by_name.get(cfg["name"])
+            if cached and cached.get("posts"):
+                result["communities"].append(
+                    {
+                        "name": cfg["name"],
+                        "board": cfg["board"],
+                        "posts": cached["posts"],
+                        "error": None,
+                        "stale": True,
+                        "boardUrl": board_url,
+                    }
+                )
+            else:
+                result["communities"].append(
+                    {"name": cfg["name"], "board": cfg["board"], "posts": [], "error": str(e), "boardUrl": board_url}
+                )
+            print(f"[warn] {cfg['name']} failed: {e}")
 
     data_json = json.dumps(result, ensure_ascii=False)
     page = PAGE_TEMPLATE.replace("__DATA_JSON__", data_json)
