@@ -179,8 +179,8 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
   .updated { font-size: 15px; color: var(--text-sub); text-align: center; margin-top: 8px; }
   .category-bar { max-width: 1620px; margin: 12px auto 0; display: flex; flex-direction: column; gap: 5px; }
-  .category-row { display: flex; flex-wrap: wrap; gap: 6px; }
-  .category-btn { flex: 0 0 auto; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 12px; padding: 4px 12px; font-size: 16px; line-height: 1.4; cursor: pointer; white-space: nowrap; }
+  .category-row { display: flex; flex-wrap: wrap; gap: 4px; }
+  .category-btn { flex: 0 0 auto; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 12px; padding: 3px 10px; font-size: 14px; line-height: 1.4; cursor: pointer; white-space: nowrap; }
   .category-btn:hover { border-color: var(--accent); color: var(--accent); }
   .category-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
   .grid { max-width: 1620px; margin: 24px auto 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr)); gap: 18px; }
