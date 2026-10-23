@@ -179,8 +179,8 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
   .updated { font-size: 15px; color: var(--text-sub); text-align: center; margin-top: 8px; }
   .category-bar { max-width: 1620px; margin: 12px auto 0; display: flex; flex-direction: column; gap: 5px; }
-  .category-row { display: flex; flex-wrap: wrap; gap: 4px; }
-  .category-btn { flex: 0 0 auto; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 12px; padding: 3px 10px; font-size: 14px; line-height: 1.4; cursor: pointer; white-space: nowrap; }
+  .category-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .category-btn { flex: 0 0 auto; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 12px; padding: 4px 12px; font-size: 16px; line-height: 1.4; cursor: pointer; white-space: nowrap; }
   .category-btn:hover { border-color: var(--accent); color: var(--accent); }
   .category-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
   .grid { max-width: 1620px; margin: 24px auto 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr)); gap: 18px; }
@@ -333,7 +333,6 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     const CATEGORY_KEY = 'trendNewsCategory';
     const CATEGORIES = COMMUNITY_DATA.categories || [['main', '주요뉴스']];
     const categoryBar = document.getElementById('categoryBar');
-    const ROW_BREAK_AFTER = '103'; // '생활' 다음부터 둘째 줄
     function getSavedCategory() {
       try {
         const raw = localStorage.getItem(CATEGORY_KEY);
@@ -344,15 +343,11 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     let currentCategory = getSavedCategory();
     function renderCategoryBar() {
       categoryBar.innerHTML = '';
-      // 한 화면에 전부 보이도록 두 줄로 나눔: 첫 줄은 주요뉴스~생활까지, 둘째 줄은 세계~랭킹
-      const breakIdx = CATEGORIES.findIndex(function (c) { return c[0] === ROW_BREAK_AFTER; });
-      let row = null;
-      CATEGORIES.forEach(function (c, i) {
-        if (!row || (breakIdx !== -1 && i === breakIdx + 1)) {
-          row = document.createElement('div');
-          row.className = 'category-row';
-          categoryBar.appendChild(row);
-        }
+      // 한 줄에 최대한 다 나오게 하고, 화면 폭이 모자랄 때만 자연스럽게 다음 줄로 넘어감(flex-wrap)
+      const row = document.createElement('div');
+      row.className = 'category-row';
+      categoryBar.appendChild(row);
+      CATEGORIES.forEach(function (c) {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'category-btn' + (c[0] === currentCategory ? ' active' : '');
