@@ -178,8 +178,9 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   .icon-btn { border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 6px; width: 34px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; line-height: 1; cursor: pointer; }
   .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
   .updated { font-size: 15px; color: var(--text-sub); text-align: center; margin-top: 8px; }
-  .category-bar { max-width: 1620px; margin: 16px auto 0; display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
-  .category-btn { flex: 0 0 auto; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 16px; padding: 6px 14px; font-size: 15px; cursor: pointer; white-space: nowrap; }
+  .category-bar { max-width: 1620px; margin: 12px auto 0; display: flex; flex-direction: column; gap: 5px; }
+  .category-row { display: flex; flex-wrap: wrap; gap: 4px; }
+  .category-btn { flex: 0 0 auto; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 12px; padding: 3px 10px; font-size: 13px; line-height: 1.4; cursor: pointer; white-space: nowrap; }
   .category-btn:hover { border-color: var(--accent); color: var(--accent); }
   .category-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
   .grid { max-width: 1620px; margin: 24px auto 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr)); gap: 18px; }
@@ -332,6 +333,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     const CATEGORY_KEY = 'trendNewsCategory';
     const CATEGORIES = COMMUNITY_DATA.categories || [['main', '주요뉴스']];
     const categoryBar = document.getElementById('categoryBar');
+    const ROW_BREAK_AFTER = '103'; // '생활' 다음부터 둘째 줄
     function getSavedCategory() {
       try {
         const raw = localStorage.getItem(CATEGORY_KEY);
@@ -342,19 +344,22 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     let currentCategory = getSavedCategory();
     function renderCategoryBar() {
       categoryBar.innerHTML = '';
-      CATEGORIES.forEach(function (c) {
+      // 한 화면에 전부 보이도록 두 줄로 나눔: 첫 줄은 주요뉴스~생활까지, 둘째 줄은 세계~랭킹
+      const breakIdx = CATEGORIES.findIndex(function (c) { return c[0] === ROW_BREAK_AFTER; });
+      let row = null;
+      CATEGORIES.forEach(function (c, i) {
+        if (!row || (breakIdx !== -1 && i === breakIdx + 1)) {
+          row = document.createElement('div');
+          row.className = 'category-row';
+          categoryBar.appendChild(row);
+        }
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'category-btn' + (c[0] === currentCategory ? ' active' : '');
         btn.textContent = c[1];
         btn.addEventListener('click', function () { setCategory(c[0], 0); });
-        categoryBar.appendChild(btn);
+        row.appendChild(btn);
       });
-      // 스와이프 등으로 분야가 바뀌었을 때 선택된 버튼이 가려지지 않도록 바 안에서 보이게 스크롤
-      const active = categoryBar.querySelector('.category-btn.active');
-      if (active && active.scrollIntoView) {
-        try { active.scrollIntoView({ block: 'nearest', inline: 'center' }); } catch (e) {}
-      }
     }
     // dir: 1 = 다음 분야(오른쪽에서 들어옴), -1 = 이전 분야(왼쪽에서 들어옴), 0 = 애니메이션 없음
     function setCategory(key, dir) {
