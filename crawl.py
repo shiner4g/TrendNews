@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # TrendNews crawler + page builder — run by .github/workflows/update.yml
-# TrendBoard(커뮤니티 버전)의 뉴스 버전. 국내 언론사 9곳의 "많이 본 뉴스" TOP10을
-# 한 화면에 모아 보여줌 - 구조/코드는 TrendBoard의 crawl.py를 그대로 가져왔음.
+# TrendBoard(커뮤니티 버전)의 뉴스 버전. 국내 언론사 9곳의 기사를 분야별
+# (주요뉴스/정치/경제/사회/생활/세계/IT/칼럼/랭킹)로 골라 볼 수 있게 한 화면에 모아 보여줌.
 #
-# 데이터 출처: 언론사별 단독 랭킹 페이지
-# (https://media.naver.com/press/<press_id>/ranking?type=popular). 네이버뉴스
+# 데이터 출처는 네이버 언론사 개별 홈(media.naver.com/press/<press_id>)의 탭들임:
+#  - 주요뉴스: 홈(/press/<id>), 분야: /press/<id>?sid=100.. , 랭킹: /press/<id>/ranking
+#  - 분야 탭은 언론사마다 달라서(예: MBC는 IT/칼럼 없음) 홈의 탭 목록으로 먼저 확인함.
+# 랭킹 탭 데이터 출처 상세: (https://media.naver.com/press/<press_id>/ranking?type=popular). 네이버뉴스
 # 메인 랭킹 페이지(news.naver.com/main/ranking/popularDay.naver)는 언론사당 TOP5만
 # 주고 실제 조회수 숫자도 공개를 안 해서(2026-10-18 최초 버전에서 썼다가 발견한
 # 한계), 언론사별 단독 페이지(media.naver.com)로 바꿈 - 이쪽은 TOP10 + 실제 조회수
@@ -18,6 +20,7 @@ import html
 import json
 import datetime
 import os
+import time
 
 TOP_N = 10
 OUT_PATH = "index.html"
@@ -91,54 +94,69 @@ def parse_naver_press(h):
     return posts
 
 
+def parse_press_edit(h):
+    # 언론사 홈(주요뉴스)과 분야 탭(정치/경제/...)은 같은 press_edit_news_* 마크업을 씀.
+    # 조회수는 없고 "1시간전" 같은 상대 시각만 있어서 time 필드로 넘김.
+    posts = []
+    for chunk in h.split('<li class="press_edit_news_item')[1:]:
+        url_m = re.search(r'<a href="(https://n\.news\.naver\.com/article/[^"]+)" class="press_edit_news_link', chunk)
+        title_m = re.search(r'<span class="press_edit_news_title">([\s\S]*?)</span>', chunk)
+        if not url_m or not title_m:
+            continue
+        time_m = re.search(r'<b>([^<]*)</b>', chunk[:3000])
+        posts.append(
+            {
+                "title": strip_tags(title_m.group(1)),
+                "url": decode_entities(url_m.group(1)),
+                "views": None,
+                "time": time_m.group(1).strip() if time_m else None,
+            }
+        )
+    return posts
+
+
+def parse_press_main(h):
+    # 주요뉴스 = 언론사 홈의 처음 두 press_edit_news_list(편집 헤드라인 6개 + "뉴스 더 보기" 6개).
+    # 그 뒤로 나오는 리스트들은 분야별 목록이 반복되는 것들이라 쓰지 않음.
+    parts = h.split('<ul class="press_edit_news_list')
+    posts = []
+    for part in parts[1:3]:
+        end = part.find("</ul>")
+        posts.extend(parse_press_edit(part[:end] if end != -1 else part))
+    return posts
+
+
+def parse_press_tabs(h):
+    # 이 언론사가 가진 분야 탭(sid) 목록 - 없는 분야(예: MBC의 IT/칼럼)는 요청하면 302로
+    # 홈으로 돌려보내서, 그걸 분야 데이터로 착각하지 않도록 탭 목록으로 먼저 확인함.
+    return set(re.findall(r'href="/press/\d+\?sid=(\d+)"', h))
+
+
+# 분야 탭: (키, 표시 이름, 네이버 sid). main/ranking은 sid 없는 특수 탭.
+CATEGORIES = [
+    ("main", "주요뉴스"),
+    ("100", "정치"),
+    ("101", "경제"),
+    ("102", "사회"),
+    ("103", "생활"),
+    ("104", "세계"),
+    ("105", "IT"),
+    ("110", "칼럼"),
+    ("ranking", "랭킹"),
+]
+
 # 언론사 ID는 네이버뉴스의 고정 press_id (수년간 안 바뀜). 통신사/방송/종합지/경제지/
 # 시사주간지/IT전문지를 섞어서 특정 성향에 치우치지 않도록 구성함.
-COMMUNITIES = [
-    {
-        "name": "MBC", "board": "많이 본 뉴스", "encoding": "utf-8", "parse": parse_naver_press,
-        "page_url": lambda n: "https://media.naver.com/press/214/ranking?type=popular",
-        "pages": 1,
-    },
-    {
-        "name": "연합뉴스", "board": "많이 본 뉴스", "encoding": "utf-8", "parse": parse_naver_press,
-        "page_url": lambda n: "https://media.naver.com/press/001/ranking?type=popular",
-        "pages": 1,
-    },
-    {
-        "name": "경향신문", "board": "많이 본 뉴스", "encoding": "utf-8", "parse": parse_naver_press,
-        "page_url": lambda n: "https://media.naver.com/press/032/ranking?type=popular",
-        "pages": 1,
-    },
-    {
-        "name": "한겨레", "board": "많이 본 뉴스", "encoding": "utf-8", "parse": parse_naver_press,
-        "page_url": lambda n: "https://media.naver.com/press/028/ranking?type=popular",
-        "pages": 1,
-    },
-    {
-        "name": "한국일보", "board": "많이 본 뉴스", "encoding": "utf-8", "parse": parse_naver_press,
-        "page_url": lambda n: "https://media.naver.com/press/469/ranking?type=popular",
-        "pages": 1,
-    },
-    {
-        "name": "매일경제", "board": "많이 본 뉴스", "encoding": "utf-8", "parse": parse_naver_press,
-        "page_url": lambda n: "https://media.naver.com/press/009/ranking?type=popular",
-        "pages": 1,
-    },
-    {
-        "name": "중앙일보", "board": "많이 본 뉴스", "encoding": "utf-8", "parse": parse_naver_press,
-        "page_url": lambda n: "https://media.naver.com/press/025/ranking?type=popular",
-        "pages": 1,
-    },
-    {
-        "name": "시사IN", "board": "많이 본 뉴스", "encoding": "utf-8", "parse": parse_naver_press,
-        "page_url": lambda n: "https://media.naver.com/press/308/ranking?type=popular",
-        "pages": 1,
-    },
-    {
-        "name": "전자신문", "board": "많이 본 뉴스", "encoding": "utf-8", "parse": parse_naver_press,
-        "page_url": lambda n: "https://media.naver.com/press/030/ranking?type=popular",
-        "pages": 1,
-    },
+PRESS_LIST = [
+    ("MBC", "214"),
+    ("연합뉴스", "001"),
+    ("경향신문", "032"),
+    ("한겨레", "028"),
+    ("한국일보", "469"),
+    ("매일경제", "009"),
+    ("중앙일보", "025"),
+    ("시사IN", "308"),
+    ("전자신문", "030"),
 ]
 
 PAGE_TEMPLATE = """<!DOCTYPE html>
@@ -160,6 +178,10 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   .icon-btn { border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 6px; width: 34px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; line-height: 1; cursor: pointer; }
   .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
   .updated { font-size: 15px; color: var(--text-sub); text-align: center; margin-top: 8px; }
+  .category-bar { max-width: 1620px; margin: 16px auto 0; display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+  .category-btn { flex: 0 0 auto; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 16px; padding: 6px 14px; font-size: 15px; cursor: pointer; white-space: nowrap; }
+  .category-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .category-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
   .grid { max-width: 1620px; margin: 24px auto 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr)); gap: 18px; }
   .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; transition: opacity 0.15s, border-color 0.15s; }
   .card.dragging { opacity: 0.4; }
@@ -181,7 +203,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   .post-title { flex: 1 1 auto; font-size: var(--post-size); color: var(--text); text-decoration: none; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .post-title:hover { color: var(--accent); text-decoration: underline; }
   .post-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
-  .views { flex: 0 0 auto; font-size: calc(var(--post-size) - 2px); color: var(--accent); background: var(--badge-bg); border-radius: 10px; padding: 1px 7px; font-weight: 600; min-width: 20px; text-align: center; font-variant-numeric: tabular-nums; }
+  .views { flex: 0 0 auto; font-size: calc(var(--post-size) - 2px); color: var(--accent); background: var(--badge-bg); border-radius: 10px; padding: 1px 7px; font-weight: 600; min-width: 20px; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .empty-note { padding: 24px 16px; color: var(--text-sub); font-size: 16px; text-align: center; }
   footer { max-width: 1620px; margin: 36px auto 0; text-align: center; }
   .controls { display: flex; justify-content: center; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 10px; }
@@ -204,6 +226,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     </div>
   </div>
   <div class="updated" id="updatedAt">불러오는 중...</div>
+  <nav class="category-bar" id="categoryBar" aria-label="분야 선택"></nav>
 </header>
 <div class="grid" id="grid"></div>
 <footer>
@@ -300,6 +323,45 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     function saveCollapsedSet(set) { try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(Array.from(set))); } catch (e) {} }
     const collapsedSet = getCollapsedSet();
 
+    // ---------- 분야 선택 (주요뉴스/정치/.../랭킹) ----------
+    const CATEGORY_KEY = 'trendNewsCategory';
+    const CATEGORIES = COMMUNITY_DATA.categories || [['main', '주요뉴스']];
+    const categoryBar = document.getElementById('categoryBar');
+    function getSavedCategory() {
+      try {
+        const raw = localStorage.getItem(CATEGORY_KEY);
+        if (raw && CATEGORIES.some(function (c) { return c[0] === raw; })) return raw;
+      } catch (e) {}
+      return CATEGORIES[0][0];
+    }
+    let currentCategory = getSavedCategory();
+    function renderCategoryBar() {
+      categoryBar.innerHTML = '';
+      CATEGORIES.forEach(function (c) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'category-btn' + (c[0] === currentCategory ? ' active' : '');
+        btn.textContent = c[1];
+        btn.addEventListener('click', function () {
+          currentCategory = c[0];
+          try { localStorage.setItem(CATEGORY_KEY, currentCategory); } catch (e) {}
+          renderCategoryBar();
+          render();
+        });
+        categoryBar.appendChild(btn);
+      });
+    }
+    function categoryName() {
+      const found = CATEGORIES.filter(function (c) { return c[0] === currentCategory; })[0];
+      return found ? found[1] : '';
+    }
+    function categoryUrl(pressId) {
+      if (!pressId) return '';
+      if (currentCategory === 'main') return 'https://media.naver.com/press/' + pressId;
+      if (currentCategory === 'ranking') return 'https://media.naver.com/press/' + pressId + '/ranking?type=popular';
+      return 'https://media.naver.com/press/' + pressId + '?sid=' + currentCategory;
+    }
+
     let currentOrder = applyOrder(COMMUNITY_DATA.communities, getSavedOrder());
     resetLink.addEventListener('click', function (e) { e.preventDefault(); localStorage.removeItem(STORAGE_KEY); currentOrder = COMMUNITY_DATA.communities.slice(); render(); });
 
@@ -360,6 +422,8 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     function render() {
       grid.innerHTML = '';
       currentOrder.forEach(function (community, index) {
+        const section = (community.sections || {})[currentCategory] || {};
+        const boardUrl = categoryUrl(community.pressId);
         const card = document.createElement('div'); card.className = 'card';
         const isCollapsed = collapsedSet.has(community.name);
         if (isCollapsed) card.classList.add('collapsed');
@@ -368,7 +432,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
         header.setAttribute('role', 'button');
         header.setAttribute('tabindex', '0');
         header.setAttribute('aria-expanded', String(!isCollapsed));
-        header.innerHTML = '<span class="drag-handle" aria-hidden="true">⠿</span>' + (community.boardUrl ? '<a class="title" href="' + escapeAttr(community.boardUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(community.name) + '</a>' : '<span class="title">' + escapeHtml(community.name) + '</span>') + '<span class="board">' + escapeHtml(community.board || '') + (community.stale ? ' · 캐시' : '') + '</span><span class="toggle-icon" aria-hidden="true">' + (isCollapsed ? '▸' : '▾') + '</span>';
+        header.innerHTML = '<span class="drag-handle" aria-hidden="true">⠿</span>' + (boardUrl ? '<a class="title" href="' + escapeAttr(boardUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(community.name) + '</a>' : '<span class="title">' + escapeHtml(community.name) + '</span>') + '<span class="board">' + escapeHtml(categoryName()) + (section.stale ? ' · 캐시' : '') + '</span><span class="toggle-icon" aria-hidden="true">' + (isCollapsed ? '▸' : '▾') + '</span>';
         card.appendChild(header);
 
         attachDragHandle(header.querySelector('.drag-handle'), card, index);
@@ -389,15 +453,17 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
           if (e.target.closest('.drag-handle') || e.target.closest('.title')) return;
           if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCollapse(); }
         });
-        if (!community.posts || community.posts.length === 0) {
+        if (!section.posts || section.posts.length === 0) {
           const empty = document.createElement('div'); empty.className = 'empty-note';
-          empty.textContent = community.error ? ('불러오지 못했습니다 (' + community.error + ')') : '표시할 뉴스가 없습니다.';
+          empty.textContent = section.unavailable ? '이 언론사에는 해당 분야가 없습니다.' : (section.error ? ('불러오지 못했습니다 (' + section.error + ')') : '표시할 뉴스가 없습니다.');
           card.appendChild(empty);
         } else {
           const list = document.createElement('ol'); list.className = 'post-list';
-          community.posts.slice(0, currentPostCount).forEach(function (post, idx) {
+          section.posts.slice(0, currentPostCount).forEach(function (post, idx) {
             const li = document.createElement('li');
-            li.innerHTML = '<a class="post-title" href="' + escapeAttr(post.url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeAttr(post.title) + '">' + escapeHtml(post.title) + '</a>' + (post.views != null ? '<span class="views">' + post.views + '</span>' : '');
+            // 랭킹은 조회수(공개하는 언론사만), 나머지 분야는 "1시간전" 같은 상대 시각을 뱃지로 표시
+            const badge = post.views != null ? post.views : (post.time || '');
+            li.innerHTML = '<a class="post-title" href="' + escapeAttr(post.url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeAttr(post.title) + '">' + escapeHtml(post.title) + '</a>' + (badge !== '' ? '<span class="views">' + escapeHtml(badge) + '</span>' : '');
             list.appendChild(li);
           });
           card.appendChild(list);
@@ -405,6 +471,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
         grid.appendChild(card);
       });
     }
+    renderCategoryBar();
     render();
     function escapeHtml(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
     function escapeAttr(s) { return escapeHtml(s).replace(/"/g, '&quot;'); }
@@ -425,9 +492,29 @@ def load_prev_data():
         if not m:
             return {}
         data = json.loads(m.group(1))
-        return {c["name"]: c for c in data.get("communities", [])}
+        prev = {}
+        for c in data.get("communities", []):
+            sections = c.get("sections")
+            if sections is None and c.get("posts"):
+                # 분야 선택 기능이 생기기 전 형식(posts가 바로 붙어있던 때)은 랭킹 탭 캐시로 취급
+                sections = {"ranking": {"posts": c["posts"]}}
+            prev[c["name"]] = sections or {}
+        return prev
     except Exception:
         return {}
+
+
+def crawl_section(key, press_id, tabs, home_html):
+    """분야 하나(key)의 기사 목록을 가져옴. 반환: 게시글 리스트 (없는 분야면 None)."""
+    if key == "main":
+        return parse_press_main(home_html)
+    if key == "ranking":
+        h = fetch(f"https://media.naver.com/press/{press_id}/ranking?type=popular", "utf-8")
+        return parse_naver_press(h)
+    if key not in tabs:
+        return None
+    h = fetch(f"https://media.naver.com/press/{press_id}?sid={key}", "utf-8")
+    return parse_press_edit(h)
 
 
 def main():
@@ -435,69 +522,50 @@ def main():
 
     result = {
         "generatedAt": (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).strftime("%Y-%m-%d %H:%M:%S") + " KST",
+        "categories": [[k, n] for k, n in CATEGORIES],
         "communities": [],
     }
 
-    for cfg in COMMUNITIES:
+    for name, press_id in PRESS_LIST:
+        prev_sections = prev_by_name.get(name, {})
+        sections = {}
+        home_html = ""
+        tabs = set()
+        home_error = None
         try:
-            seen_urls = set()
-            posts = []
-            page_errors = []
-            for page_num in range(1, cfg.get("pages", 1) + 1):
-                page_url = cfg["page_url"](page_num)
-                page_body = cfg.get("page_body", lambda n: None)(page_num)
-                try:
-                    html_content = fetch(
-                        page_url,
-                        cfg["encoding"],
-                        method=cfg.get("fetch_method", "GET"),
-                        data=page_body,
-                        extra_headers=cfg.get("fetch_headers"),
-                    )
-                    page_posts = cfg["parse"](html_content)
-                except Exception as page_e:
-                    page_errors.append(f"page {page_num}: {page_e}")
-                    continue
-                for post in page_posts:
-                    if post["url"] not in seen_urls:
-                        seen_urls.add(post["url"])
-                        posts.append(post)
-            if not posts:
-                raise ValueError(
-                    "no posts parsed - site markup may have changed"
-                    + (f" ({'; '.join(page_errors)})" if page_errors else "")
-                )
-            # 일부 언론사는 조회수를 공개 안 해서 views가 None일 수 있음 - 그런
-            # 경우 0 취급해서 정렬하되(같은 언론사 안에서는 전부 None이라 결과적으로
-            # 원래 네이버 순위 순서가 그대로 유지됨), 화면에 실제로 뿌릴 때는
-            # None을 0으로 바꿔치기하지 않음(아래 JS에서 처리).
-            posts.sort(key=lambda x: x["views"] or 0, reverse=True)
-            top = posts[:TOP_N]
-            board_url = cfg.get("link_url", cfg["page_url"](1))
-            result["communities"].append(
-                {"name": cfg["name"], "board": cfg["board"], "posts": top, "error": None, "boardUrl": board_url}
-            )
-            if page_errors:
-                print(f"[warn] {cfg['name']} had partial page failures: {'; '.join(page_errors)}")
+            home_html = fetch(f"https://media.naver.com/press/{press_id}", "utf-8")
+            tabs = parse_press_tabs(home_html)
         except Exception as e:
-            board_url = cfg.get("link_url", cfg["page_url"](1))
-            cached = None if cfg.get("no_cache") else prev_by_name.get(cfg["name"])
-            if cached and cached.get("posts"):
-                result["communities"].append(
-                    {
-                        "name": cfg["name"],
-                        "board": cfg["board"],
-                        "posts": cached["posts"],
-                        "error": None,
-                        "stale": True,
-                        "boardUrl": board_url,
-                    }
-                )
-            else:
-                result["communities"].append(
-                    {"name": cfg["name"], "board": cfg["board"], "posts": [], "error": str(e), "boardUrl": board_url}
-                )
-            print(f"[warn] {cfg['name']} failed: {e}")
+            home_error = str(e)
+            print(f"[warn] {name} home failed: {e}")
+
+        for key, _label in CATEGORIES:
+            try:
+                if key == "main" and home_error:
+                    raise ValueError(home_error)
+                # 홈을 못 받았으면 어떤 분야가 있는 언론사인지 알 수 없으니, 분야 탭은
+                # 있는 걸로 치고 시도함(실패하면 캐시로 대체됨).
+                effective_tabs = tabs if not home_error else {k for k, _ in CATEGORIES}
+                posts = crawl_section(key, press_id, effective_tabs, home_html)
+                if posts is None:
+                    sections[key] = {"posts": [], "unavailable": True}
+                elif not posts:
+                    raise ValueError("no posts parsed - site markup may have changed")
+                else:
+                    if key == "ranking":
+                        posts.sort(key=lambda x: x["views"] or 0, reverse=True)
+                    sections[key] = {"posts": posts[:TOP_N], "error": None}
+            except Exception as e:
+                cached = prev_sections.get(key)
+                if cached and cached.get("posts"):
+                    sections[key] = {"posts": cached["posts"], "error": None, "stale": True}
+                else:
+                    sections[key] = {"posts": [], "error": str(e)}
+                print(f"[warn] {name}/{key} failed: {e}")
+            if key not in ("main",):
+                time.sleep(0.2)  # 한 언론사에 몰아서 요청하지 않도록 살짝 간격을 둠
+
+        result["communities"].append({"name": name, "pressId": press_id, "sections": sections})
 
     data_json = json.dumps(result, ensure_ascii=False)
     page = PAGE_TEMPLATE.replace("__DATA_JSON__", data_json)
