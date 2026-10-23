@@ -183,6 +183,11 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   .category-btn:hover { border-color: var(--accent); color: var(--accent); }
   .category-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
   .grid { max-width: 1620px; margin: 24px auto 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr)); gap: 18px; }
+  @keyframes slideFromRight { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
+  @keyframes slideFromLeft { from { opacity: 0; transform: translateX(-28px); } to { opacity: 1; transform: none; } }
+  .grid.slide-from-right { animation: slideFromRight 0.2s ease-out; }
+  .grid.slide-from-left { animation: slideFromLeft 0.2s ease-out; }
+  @media (prefers-reduced-motion: reduce) { .grid.slide-from-right, .grid.slide-from-left { animation: none; } }
   .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; transition: opacity 0.15s, border-color 0.15s; }
   .card.dragging { opacity: 0.4; }
   .card.drag-over { border-color: var(--accent); }
@@ -342,14 +347,35 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
         btn.type = 'button';
         btn.className = 'category-btn' + (c[0] === currentCategory ? ' active' : '');
         btn.textContent = c[1];
-        btn.addEventListener('click', function () {
-          currentCategory = c[0];
-          try { localStorage.setItem(CATEGORY_KEY, currentCategory); } catch (e) {}
-          renderCategoryBar();
-          render();
-        });
+        btn.addEventListener('click', function () { setCategory(c[0], 0); });
         categoryBar.appendChild(btn);
       });
+      // 스와이프 등으로 분야가 바뀌었을 때 선택된 버튼이 가려지지 않도록 바 안에서 보이게 스크롤
+      const active = categoryBar.querySelector('.category-btn.active');
+      if (active && active.scrollIntoView) {
+        try { active.scrollIntoView({ block: 'nearest', inline: 'center' }); } catch (e) {}
+      }
+    }
+    // dir: 1 = 다음 분야(오른쪽에서 들어옴), -1 = 이전 분야(왼쪽에서 들어옴), 0 = 애니메이션 없음
+    function setCategory(key, dir) {
+      if (key === currentCategory) return;
+      currentCategory = key;
+      try { localStorage.setItem(CATEGORY_KEY, currentCategory); } catch (e) {}
+      renderCategoryBar();
+      render();
+      if (dir) {
+        const cls = dir > 0 ? 'slide-from-right' : 'slide-from-left';
+        grid.classList.remove('slide-from-right', 'slide-from-left');
+        void grid.offsetWidth; // 같은 클래스를 연속으로 줘도 애니메이션이 다시 재생되도록 리플로우
+        grid.classList.add(cls);
+      }
+    }
+    function stepCategory(delta) {
+      const idx = CATEGORIES.findIndex(function (c) { return c[0] === currentCategory; });
+      const next = idx + delta;
+      if (idx === -1 || next < 0 || next >= CATEGORIES.length) return false; // 양 끝에서는 순환하지 않음
+      setCategory(CATEGORIES[next][0], delta);
+      return true;
     }
     function categoryName() {
       const found = CATEGORIES.filter(function (c) { return c[0] === currentCategory; })[0];
@@ -471,6 +497,58 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
         grid.appendChild(card);
       });
     }
+    // ---------- 좌우 스와이프/스크롤로 이전·다음 분야 이동 ----------
+    // 터치: 손가락을 왼쪽으로 밀면 다음 분야, 오른쪽으로 밀면 이전 분야.
+    // 세로 스크롤과 헷갈리지 않게 "가로로 충분히 길고 세로 이동의 2배 이상"일 때만 반응함.
+    // 분야 바(자체 가로 스크롤), 카드 드래그 핸들(순서 변경), 가로 스크롤되는 요소에서
+    // 시작한 제스처는 무시함.
+    const SWIPE_MIN_X = 60;
+    let swipeStart = null;
+    function isSwipeBlocked(target) {
+      if (!target || !target.closest) return false;
+      if (target.closest('#categoryBar') || target.closest('.drag-handle') || target.closest('.font-controls') || target.closest('.count-controls')) return true;
+      for (let el = target; el && el !== document.body; el = el.parentElement) {
+        if (el.scrollWidth > el.clientWidth + 1) {
+          const ox = getComputedStyle(el).overflowX;
+          if (ox === 'auto' || ox === 'scroll') return true;
+        }
+      }
+      return false;
+    }
+    document.addEventListener('touchstart', function (e) {
+      if (e.touches.length !== 1 || dragActive || isSwipeBlocked(e.target)) { swipeStart = null; return; }
+      swipeStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }, { passive: true });
+    document.addEventListener('touchend', function (e) {
+      if (!swipeStart || dragActive) { swipeStart = null; return; }
+      const t = e.changedTouches[0];
+      const dx = t.clientX - swipeStart.x;
+      const dy = t.clientY - swipeStart.y;
+      swipeStart = null;
+      if (Math.abs(dx) < SWIPE_MIN_X || Math.abs(dx) < Math.abs(dy) * 2) return;
+      stepCategory(dx < 0 ? 1 : -1);
+    }, { passive: true });
+    document.addEventListener('touchcancel', function () { swipeStart = null; }, { passive: true });
+
+    // 마우스/트랙패드: 가로 스크롤(deltaX)이 세로보다 확실히 클 때만 반응. 한 번의 스와이프에
+    // 휠 이벤트가 수십 개 연달아 오기 때문에 값을 누적하고, 한 번 넘기면 잠시 쉼.
+    let wheelAcc = 0;
+    let wheelLockUntil = 0;
+    let wheelResetTimer = null;
+    document.addEventListener('wheel', function (e) {
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY) * 1.5 || isSwipeBlocked(e.target)) return;
+      const now = Date.now();
+      if (now < wheelLockUntil) return;
+      wheelAcc += e.deltaX;
+      clearTimeout(wheelResetTimer);
+      wheelResetTimer = setTimeout(function () { wheelAcc = 0; }, 200);
+      if (Math.abs(wheelAcc) >= 80) {
+        const moved = stepCategory(wheelAcc > 0 ? 1 : -1);
+        wheelAcc = 0;
+        wheelLockUntil = now + (moved ? 700 : 150);
+      }
+    }, { passive: true });
+
     renderCategoryBar();
     render();
     function escapeHtml(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
