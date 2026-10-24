@@ -549,6 +549,16 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
       }
     }, { passive: true });
 
+    // 키보드: →/← 키로 다음/이전 분야 이동. Alt/Ctrl/Cmd/Shift가 같이 눌렸으면(Alt+←는
+    // 브라우저 뒤로가기 등) 건드리지 않고, 입력창에 포커스가 있을 때도 무시함.
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.defaultPrevented || dragActive) return;
+      const t = e.target;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      stepCategory(e.key === 'ArrowRight' ? 1 : -1);
+    });
+
     renderCategoryBar();
     render();
     function escapeHtml(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
