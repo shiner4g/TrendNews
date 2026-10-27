@@ -6,6 +6,8 @@
 # 데이터 출처는 네이버 언론사 개별 홈(media.naver.com/press/<press_id>)의 탭들임:
 #  - 주요뉴스: 홈(/press/<id>), 분야: /press/<id>?sid=100.. , 랭킹: /press/<id>/ranking
 #  - 분야 탭은 언론사마다 달라서(예: MBC는 IT/칼럼 없음) 홈의 탭 목록으로 먼저 확인함.
+#  - 랭킹 말고 분야 탭들은 원래 "그냥 최신글"이라서, 네이버가 댓글 수를 채워넣을 때 쓰는
+#    API(POST media.naver.com/commonComment/listCount)로 댓글 수를 받아 댓글 많은 순으로 정렬함.
 # 랭킹 탭 데이터 출처 상세: (https://media.naver.com/press/<press_id>/ranking?type=popular). 네이버뉴스
 # 메인 랭킹 페이지(news.naver.com/main/ranking/popularDay.naver)는 언론사당 TOP5만
 # 주고 실제 조회수 숫자도 공개를 안 해서(2026-10-18 최초 버전에서 썼다가 발견한
@@ -487,8 +489,12 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
           const list = document.createElement('ol'); list.className = 'post-list';
           section.posts.slice(0, currentPostCount).forEach(function (post, idx) {
             const li = document.createElement('li');
-            // 랭킹은 조회수(공개하는 언론사만), 나머지 분야는 "1시간전" 같은 상대 시각을 뱃지로 표시
-            const badge = post.views != null ? post.views : (post.time || '');
+            // 랭킹 탭: 조회수(공개하는 언론사만). 그 외 분야: 댓글 많은 순이므로 댓글 수를 보여줌
+            // (댓글 수를 못 받아온 경우에만 "1시간전" 같은 기사 시각으로 대체)
+            let badge;
+            if (currentCategory === 'ranking') badge = post.views != null ? post.views : '';
+            else if (post.comments != null) badge = '댓글 ' + post.comments;
+            else badge = post.time || '';
             li.innerHTML = '<a class="post-title" href="' + escapeAttr(post.url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeAttr(post.title) + '">' + escapeHtml(post.title) + '</a>' + (badge !== '' ? '<span class="views">' + escapeHtml(badge) + '</span>' : '');
             list.appendChild(li);
           });
@@ -605,6 +611,44 @@ def crawl_section(key, press_id, tabs, home_html):
     return parse_press_edit(h)
 
 
+def gno_of(url):
+    m = re.search(r"/article/(\d+)/(\d+)", url)
+    return f"news{m.group(1)},{m.group(2)}" if m else None
+
+
+def fetch_comment_counts(press_id, gnos):
+    """네이버가 기사 목록 페이지에서 댓글 수를 채워넣을 때 쓰는 API를 그대로 호출함.
+    POST /commonComment/listCount, gnos="news<언론사>,<기사ID>;..." (한 번에 여러 개 가능).
+    화면엔 "30+", "100+"처럼 뭉뚱그려 보여주지만 API 응답 자체는 정확한 숫자임."""
+    counts = {}
+    gnos = sorted(set(g for g in gnos if g))
+    for i in range(0, len(gnos), 100):
+        chunk = gnos[i : i + 100]
+        body = urllib.parse.urlencode({"gnos": ";".join(chunk)})
+        text = fetch(
+            "https://media.naver.com/commonComment/listCount",
+            "utf-8",
+            method="POST",
+            data=body,
+            extra_headers={
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "Referer": f"https://media.naver.com/press/{press_id}",
+                "X-Requested-With": "XMLHttpRequest",
+            },
+        )
+        for item in json.loads(text)["message"]["result"]:
+            c = item.get("count")
+            counts[item["gno"]] = c if isinstance(c, int) and c >= 0 else 0
+    return counts
+
+
+def sort_by_comments(posts, counts):
+    # 댓글 많은 순. 댓글 수가 같으면 원래 순서(네이버가 보여주는 순서=대체로 최신순)를 유지함.
+    for p in posts:
+        p["comments"] = counts.get(gno_of(p["url"]), 0)
+    return sorted(posts, key=lambda p: -p["comments"])
+
+
 def main():
     prev_by_name = load_prev_data()
 
@@ -627,6 +671,8 @@ def main():
             home_error = str(e)
             print(f"[warn] {name} home failed: {e}")
 
+        # 1단계: 분야별 기사 목록을 전부 받아둠 (key -> 게시글 리스트 / None(없는 분야) / Exception)
+        fetched = {}
         for key, _label in CATEGORIES:
             try:
                 if key == "main" and home_error:
@@ -635,23 +681,53 @@ def main():
                 # 있는 걸로 치고 시도함(실패하면 캐시로 대체됨).
                 effective_tabs = tabs if not home_error else {k for k, _ in CATEGORIES}
                 posts = crawl_section(key, press_id, effective_tabs, home_html)
-                if posts is None:
-                    sections[key] = {"posts": [], "unavailable": True}
-                elif not posts:
+                if posts is not None and not posts:
                     raise ValueError("no posts parsed - site markup may have changed")
-                else:
-                    if key == "ranking":
-                        posts.sort(key=lambda x: x["views"] or 0, reverse=True)
-                    sections[key] = {"posts": posts[:TOP_N], "error": None}
+                fetched[key] = posts
             except Exception as e:
-                cached = prev_sections.get(key)
+                fetched[key] = e
+            if key != "main":
+                time.sleep(0.2)  # 한 언론사에 몰아서 요청하지 않도록 살짝 간격을 둠
+
+        # 2단계: 랭킹 말고 분야 탭들은 "그냥 최신글"이라서, 이 언론사 기사 전체의 댓글 수를
+        # 한 번에 받아와서(분야 하나당 요청 1번씩 하지 않고) 댓글 많은 순으로 정렬함.
+        counts = None
+        counts_error = None
+        gnos = [
+            gno_of(p["url"])
+            for key, v in fetched.items()
+            if key != "ranking" and isinstance(v, list)
+            for p in v
+        ]
+        if gnos:
+            try:
+                counts = fetch_comment_counts(press_id, gnos)
+            except Exception as e:
+                counts_error = e
+                print(f"[warn] {name} comment counts failed: {e}")
+
+        for key, _label in CATEGORIES:
+            v = fetched[key]
+            cached = prev_sections.get(key)
+            if v is None:
+                sections[key] = {"posts": [], "unavailable": True}
+            elif isinstance(v, Exception):
                 if cached and cached.get("posts"):
                     sections[key] = {"posts": cached["posts"], "error": None, "stale": True}
                 else:
-                    sections[key] = {"posts": [], "error": str(e)}
-                print(f"[warn] {name}/{key} failed: {e}")
-            if key not in ("main",):
-                time.sleep(0.2)  # 한 언론사에 몰아서 요청하지 않도록 살짝 간격을 둠
+                    sections[key] = {"posts": [], "error": str(v)}
+                print(f"[warn] {name}/{key} failed: {v}")
+            elif key == "ranking":
+                v.sort(key=lambda x: x["views"] or 0, reverse=True)
+                sections[key] = {"posts": v[:TOP_N], "error": None}
+            elif counts is not None:
+                sections[key] = {"posts": sort_by_comments(v, counts)[:TOP_N], "error": None}
+            elif cached and cached.get("posts"):
+                # 댓글 수를 못 받았으면 정렬을 못 하니, 직전에 정렬해둔 데이터를 씀
+                sections[key] = {"posts": cached["posts"], "error": None, "stale": True}
+            else:
+                # 캐시도 없으면 빈 화면보다는 정렬 안 된 최신글이라도 보여줌 (시각 뱃지로 표시됨)
+                sections[key] = {"posts": v[:TOP_N], "error": None}
 
         result["communities"].append({"name": name, "pressId": press_id, "sections": sections})
 
