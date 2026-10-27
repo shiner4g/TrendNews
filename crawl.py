@@ -493,7 +493,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
             // (댓글 수를 못 받아온 경우에만 "1시간전" 같은 기사 시각으로 대체)
             let badge;
             if (currentCategory === 'ranking') badge = post.views != null ? post.views : '';
-            else if (post.comments != null) badge = '댓글 ' + post.comments;
+            else if (post.comments != null) badge = String(post.comments);
             else badge = post.time || '';
             li.innerHTML = '<a class="post-title" href="' + escapeAttr(post.url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeAttr(post.title) + '">' + escapeHtml(post.title) + '</a>' + (badge !== '' ? '<span class="views">' + escapeHtml(badge) + '</span>' : '');
             list.appendChild(li);
