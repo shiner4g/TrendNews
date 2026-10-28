@@ -131,10 +131,55 @@ def parse_press_main(h):
 def parse_press_tabs(h):
     # 이 언론사가 가진 분야 탭(sid) 목록 - 없는 분야(예: MBC의 IT/칼럼)는 요청하면 302로
     # 홈으로 돌려보내서, 그걸 분야 데이터로 착각하지 않도록 탭 목록으로 먼저 확인함.
-    return set(re.findall(r'href="/press/\d+\?sid=(\d+)"', h))
+    tabs = set(re.findall(r'href="/press/\d+\?sid=(\d+)"', h))
+    # 신문사(지면)가 있는 언론사만 "신문보기" 탭이 있음 (MBC/연합뉴스/시사IN은 없음)
+    if re.search(r'href="/press/\d+/newspaper"', h):
+        tabs.add("newspaper")
+    return tabs
 
 
-# 분야 탭: (키, 표시 이름, 네이버 sid). main/ranking은 sid 없는 특수 탭.
+def parse_newspaper(h):
+    # 신문보기 페이지는 면(A1, A2, ...)마다 <div class="newspaper_wrp"> 블록이 하나씩이고
+    # 그 안에 그 면의 기사들이 <li>로 들어있음. 기사가 있는 면만 나와서 번호가 띄엄띄엄함
+    # (예: 1,2,3,4,5,6,8,10 - 7면과 9면은 빠짐). 그래서 "1~3면" 필터는 목록 순서가 아니라
+    # 면 번호 자체로 걸어야 하고, 매일경제(A/B/C 섹션)·중앙일보(A/E 섹션)처럼 섹션이
+    # 나뉜 신문은 첫 섹션(A)만 "본지"로 취급해서 B1/C1 같은 게 1면으로 잡히지 않게 함.
+    posts = []
+    seen = set()
+    first_sec = None
+    for block in h.split('<div class="newspaper_wrp">')[1:]:
+        lab_m = re.search(r'<span class="page_notation"><em>([^<]*)</em>', block)
+        if not lab_m:
+            continue
+        label = lab_m.group(1).strip()
+        sm = re.match(r"^([A-Za-z]*)(\d+)$", label)
+        if not sm:
+            continue
+        sec, num = sm.group(1), int(sm.group(2))
+        if first_sec is None:
+            first_sec = sec
+        for li in block.split("<li>")[1:]:
+            url_m = re.search(r'<a\s[^>]*href="(https://n\.news\.naver\.com/article/newspaper/[^"]+)"', li)
+            title_m = re.search(r"<strong>([\s\S]*?)</strong>", li)
+            if not url_m or not title_m:
+                continue
+            url = decode_entities(url_m.group(1))
+            if url in seen:
+                continue
+            seen.add(url)
+            posts.append(
+                {
+                    "title": strip_tags(title_m.group(1)),
+                    "url": url,
+                    "page": label,
+                    "pageNo": num,
+                    "main": sec == first_sec,
+                }
+            )
+    return posts
+
+
+# 분야 탭: (키, 표시 이름, 네이버 sid). main/ranking/newspaper는 sid 없는 특수 탭.
 CATEGORIES = [
     ("main", "주요뉴스"),
     ("100", "정치"),
@@ -144,6 +189,7 @@ CATEGORIES = [
     ("104", "세계"),
     ("105", "IT"),
     ("110", "칼럼"),
+    ("newspaper", "지면"),
     ("ranking", "랭킹"),
 ]
 
@@ -209,6 +255,13 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   ol.post-list li { display: flex; align-items: baseline; gap: 8px; padding: 9px 16px; border-bottom: 1px dashed var(--border); }
   ol.post-list li:last-child { border-bottom: none; }
   .post-title { flex: 1 1 auto; font-size: var(--post-size); color: var(--text); text-decoration: none; line-height: 1.4; white-space: normal; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; }
+  .paper-filter { max-width: 1620px; margin: 8px auto 0; display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; }
+  .paper-filter[hidden] { display: none; }
+  .paper-filter-label { font-size: 13px; color: var(--text-sub); margin-right: 2px; }
+  .paper-btn { border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 12px; padding: 2px 10px; font-size: 13px; line-height: 1.4; cursor: pointer; white-space: nowrap; }
+  .paper-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .paper-btn.active { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+  ol.post-list.scrolling { max-height: 560px; overflow-y: auto; }
   .post-title:hover { color: var(--accent); text-decoration: underline; }
   .post-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
   .views { flex: 0 0 auto; font-size: calc(var(--post-size) - 2px); color: var(--accent); background: var(--badge-bg); border-radius: 10px; padding: 1px 7px; font-weight: 600; min-width: 20px; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -235,6 +288,12 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   </div>
   <div class="updated" id="updatedAt">불러오는 중...</div>
   <nav class="category-bar" id="categoryBar" aria-label="분야 선택"></nav>
+  <div class="paper-filter" id="paperFilter" hidden>
+    <span class="paper-filter-label">면 범위</span>
+    <button type="button" class="paper-btn" data-range="1">1면만</button>
+    <button type="button" class="paper-btn" data-range="3">1~3면</button>
+    <button type="button" class="paper-btn" data-range="all">전체</button>
+  </div>
 </header>
 <div class="grid" id="grid"></div>
 <footer>
@@ -357,6 +416,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
         btn.addEventListener('click', function () { setCategory(c[0], 0); });
         row.appendChild(btn);
       });
+      renderPaperFilter();
     }
     // dir: 1 = 다음 분야(오른쪽에서 들어옴), -1 = 이전 분야(왼쪽에서 들어옴), 0 = 애니메이션 없음
     function setCategory(key, dir) {
@@ -387,8 +447,32 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
       if (!pressId) return '';
       if (currentCategory === 'main') return 'https://media.naver.com/press/' + pressId;
       if (currentCategory === 'ranking') return 'https://media.naver.com/press/' + pressId + '/ranking?type=popular';
+      if (currentCategory === 'newspaper') return 'https://media.naver.com/press/' + pressId + '/newspaper';
       return 'https://media.naver.com/press/' + pressId + '?sid=' + currentCategory;
     }
+
+    // ---------- 지면 탭 전용: 몇 면까지 볼지 (1면만 / 1~3면 / 전체) ----------
+    const PAPER_KEY = 'trendNewsPaperRange';
+    const paperFilter = document.getElementById('paperFilter');
+    function getSavedPaperRange() {
+      try { const raw = localStorage.getItem(PAPER_KEY); if (raw === '1' || raw === '3' || raw === 'all') return raw; } catch (e) {}
+      return '1';
+    }
+    let paperRange = getSavedPaperRange();
+    function renderPaperFilter() {
+      paperFilter.hidden = currentCategory !== 'newspaper';
+      Array.from(paperFilter.querySelectorAll('.paper-btn')).forEach(function (b) {
+        b.classList.toggle('active', b.getAttribute('data-range') === paperRange);
+      });
+    }
+    Array.from(paperFilter.querySelectorAll('.paper-btn')).forEach(function (b) {
+      b.addEventListener('click', function () {
+        paperRange = b.getAttribute('data-range');
+        try { localStorage.setItem(PAPER_KEY, paperRange); } catch (e) {}
+        renderPaperFilter();
+        render();
+      });
+    });
 
     let currentOrder = applyOrder(COMMUNITY_DATA.communities, getSavedOrder());
     resetLink.addEventListener('click', function (e) { e.preventDefault(); localStorage.removeItem(STORAGE_KEY); currentOrder = COMMUNITY_DATA.communities.slice(); render(); });
@@ -481,18 +565,31 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
           if (e.target.closest('.drag-handle') || e.target.closest('.title')) return;
           if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCollapse(); }
         });
-        if (!section.posts || section.posts.length === 0) {
+        // 보여줄 기사 목록 결정: 지면 탭은 "면 범위" 필터(기사 개수 설정은 적용 안 함 - 면 범위가
+        // 곧 분량 조절이라서), 나머지 분야는 기존처럼 기사 개수 설정만큼 자름
+        let visible = section.posts || [];
+        const isPaper = currentCategory === 'newspaper';
+        if (isPaper) {
+          if (paperRange !== 'all') visible = visible.filter(function (p) { return p.main && p.pageNo <= Number(paperRange); });
+        } else {
+          visible = visible.slice(0, currentPostCount);
+        }
+        if (visible.length === 0) {
           const empty = document.createElement('div'); empty.className = 'empty-note';
-          empty.textContent = section.unavailable ? '이 언론사에는 해당 분야가 없습니다.' : (section.error ? ('불러오지 못했습니다 (' + section.error + ')') : '표시할 뉴스가 없습니다.');
+          if (section.unavailable) empty.textContent = isPaper ? '이 언론사는 신문 지면보기가 없습니다.' : '이 언론사에는 해당 분야가 없습니다.';
+          else if (section.error) empty.textContent = '불러오지 못했습니다 (' + section.error + ')';
+          else empty.textContent = isPaper ? '해당 면의 기사가 없습니다.' : '표시할 뉴스가 없습니다.';
           card.appendChild(empty);
         } else {
-          const list = document.createElement('ol'); list.className = 'post-list';
-          section.posts.slice(0, currentPostCount).forEach(function (post, idx) {
+          const list = document.createElement('ol'); list.className = 'post-list' + (isPaper && paperRange === 'all' ? ' scrolling' : '');
+          visible.forEach(function (post, idx) {
             const li = document.createElement('li');
-            // 랭킹 탭: 조회수(공개하는 언론사만). 그 외 분야: 댓글 많은 순이므로 댓글 수를 보여줌
+            // 랭킹 탭: 조회수(공개하는 언론사만). 지면 탭: 몇 면 기사인지("A1면").
+            // 그 외 분야: 댓글 많은 순이므로 댓글 수를 보여줌
             // (댓글 수를 못 받아온 경우에만 "1시간전" 같은 기사 시각으로 대체)
             let badge;
             if (currentCategory === 'ranking') badge = post.views != null ? post.views : '';
+            else if (isPaper) badge = post.page ? post.page + '면' : '';
             else if (post.comments != null) badge = String(post.comments);
             else badge = post.time || '';
             li.innerHTML = '<a class="post-title" href="' + escapeAttr(post.url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeAttr(post.title) + '">' + escapeHtml(post.title) + '</a>' + (badge !== '' ? '<span class="views">' + escapeHtml(badge) + '</span>' : '');
@@ -512,7 +609,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     let swipeStart = null;
     function isSwipeBlocked(target) {
       if (!target || !target.closest) return false;
-      if (target.closest('#categoryBar') || target.closest('.drag-handle') || target.closest('.font-controls') || target.closest('.count-controls')) return true;
+      if (target.closest('#categoryBar') || target.closest('#paperFilter') || target.closest('.drag-handle') || target.closest('.font-controls') || target.closest('.count-controls')) return true;
       for (let el = target; el && el !== document.body; el = el.parentElement) {
         if (el.scrollWidth > el.clientWidth + 1) {
           const ox = getComputedStyle(el).overflowX;
@@ -607,6 +704,9 @@ def crawl_section(key, press_id, tabs, home_html):
         return parse_naver_press(h)
     if key not in tabs:
         return None
+    if key == "newspaper":
+        h = fetch(f"https://media.naver.com/press/{press_id}/newspaper", "utf-8")
+        return parse_newspaper(h)
     h = fetch(f"https://media.naver.com/press/{press_id}?sid={key}", "utf-8")
     return parse_press_edit(h)
 
@@ -696,7 +796,7 @@ def main():
         gnos = [
             gno_of(p["url"])
             for key, v in fetched.items()
-            if key != "ranking" and isinstance(v, list)
+            if key not in ("ranking", "newspaper") and isinstance(v, list)
             for p in v
         ]
         if gnos:
@@ -717,6 +817,9 @@ def main():
                 else:
                     sections[key] = {"posts": [], "error": str(v)}
                 print(f"[warn] {name}/{key} failed: {v}")
+            elif key == "newspaper":
+                # 지면은 면 순서 그대로 전부 저장함 (몇 면까지 볼지는 화면에서 필터로 고름)
+                sections[key] = {"posts": v[:400], "error": None}
             elif key == "ranking":
                 v.sort(key=lambda x: x["views"] or 0, reverse=True)
                 sections[key] = {"posts": v[:TOP_N], "error": None}
