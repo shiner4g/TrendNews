@@ -262,7 +262,6 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   .paper-btn { border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 12px; padding: 2px 10px; font-size: 13px; line-height: 1.4; cursor: pointer; white-space: nowrap; }
   .paper-btn:hover { border-color: var(--accent); color: var(--accent); }
   .paper-btn.active { border-color: var(--accent); color: var(--accent); font-weight: 700; }
-  ol.post-list.scrolling { max-height: 560px; overflow-y: auto; }
   .post-title:hover { color: var(--accent); text-decoration: underline; }
   .post-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
   .views { flex: 0 0 auto; font-size: calc(var(--post-size) - 2px); color: var(--accent); background: var(--badge-bg); border-radius: 10px; padding: 1px 7px; font-weight: 600; min-width: 20px; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -291,11 +290,10 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   <nav class="category-bar" id="categoryBar" aria-label="분야 선택"></nav>
   <div class="paper-filter" id="paperFilter" hidden>
     <button type="button" class="paper-btn" data-range="1-1">1면</button>
-    <button type="button" class="paper-btn" data-range="1-3">1~3</button>
-    <button type="button" class="paper-btn" data-range="4-10">4~10</button>
+    <button type="button" class="paper-btn" data-range="1-10">1~10</button>
     <button type="button" class="paper-btn" data-range="11-20">11~20</button>
     <button type="button" class="paper-btn" data-range="21-30">21~30</button>
-    <button type="button" class="paper-btn" data-range="all">전체</button>
+    <button type="button" class="paper-btn" data-range="31-">31~</button>
   </div>
 </header>
 <div class="grid" id="grid"></div>
@@ -422,23 +420,42 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
       renderPaperFilter();
     }
     // dir: 1 = 다음 분야(오른쪽에서 들어옴), -1 = 이전 분야(왼쪽에서 들어옴), 0 = 애니메이션 없음
+    function playSlide(dir) {
+      if (!dir) return;
+      const cls = dir > 0 ? 'slide-from-right' : 'slide-from-left';
+      grid.classList.remove('slide-from-right', 'slide-from-left');
+      void grid.offsetWidth; // 같은 클래스를 연속으로 줘도 애니메이션이 다시 재생되도록 리플로우
+      grid.classList.add(cls);
+    }
     function setCategory(key, dir) {
       if (key === currentCategory) return;
       currentCategory = key;
       try { localStorage.setItem(CATEGORY_KEY, currentCategory); } catch (e) {}
+      if (key === 'newspaper') paperPick = {}; // 지면 탭에 들어올 때마다 랜덤 추첨을 새로 함
       renderCategoryBar();
       render();
-      if (dir) {
-        const cls = dir > 0 ? 'slide-from-right' : 'slide-from-left';
-        grid.classList.remove('slide-from-right', 'slide-from-left');
-        void grid.offsetWidth; // 같은 클래스를 연속으로 줘도 애니메이션이 다시 재생되도록 리플로우
-        grid.classList.add(cls);
-      }
+      playSlide(dir);
     }
     function stepCategory(delta) {
+      // 지면 탭 안에서는 좌우 이동이 "다음/이전 면 범위"(1면 → 1~10 → 11~20 → 21~30 → 31~)이고,
+      // 맨 끝(31~)을 넘어가면 다음 분야(랭킹), 맨 앞(1면) 이전으로 가면 이전 분야(칼럼)로 넘어감.
+      if (currentCategory === 'newspaper') {
+        const pi = PAPER_RANGES.indexOf(paperRange);
+        const pj = pi + delta;
+        if (pi !== -1 && pj >= 0 && pj < PAPER_RANGES.length) {
+          setPaperRange(PAPER_RANGES[pj], delta);
+          return true;
+        }
+      }
       const idx = CATEGORIES.findIndex(function (c) { return c[0] === currentCategory; });
       const next = idx + delta;
       if (idx === -1 || next < 0 || next >= CATEGORIES.length) return false; // 양 끝에서는 순환하지 않음
+      // 스와이프로 지면 탭에 들어올 때: 오른쪽으로(다음) 들어오면 첫 범위(1면)부터,
+      // 왼쪽으로(이전) 들어오면 마지막 범위(31~)부터 보이게 함.
+      if (CATEGORIES[next][0] === 'newspaper') {
+        paperRange = delta > 0 ? PAPER_RANGES[0] : PAPER_RANGES[PAPER_RANGES.length - 1];
+        try { localStorage.setItem(PAPER_KEY, paperRange); } catch (e) {}
+      }
       setCategory(CATEGORIES[next][0], delta);
       return true;
     }
@@ -454,33 +471,56 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
       return 'https://media.naver.com/press/' + pressId + '?sid=' + currentCategory;
     }
 
-    // ---------- 지면 탭 전용: 몇 면까지 볼지 (1면만 / 1~3면 / 전체) ----------
+    // ---------- 지면 탭 전용: 면 범위 (1면 / 1~10 / 11~20 / 21~30 / 31~) ----------
+    // 1면은 그 면 기사를 전부 보여주고, 나머지 범위는 그 범위 기사 중 "언론당 기사 개수"만큼만
+    // 무작위로 골라서 보여줌 (고른 기사는 면 순서대로 정렬해서 표시).
     const PAPER_KEY = 'trendNewsPaperRange';
-    const PAPER_RANGES = ['1-1', '1-3', '4-10', '11-20', '21-30', 'all'];
+    const PAPER_RANGES = ['1-1', '1-10', '11-20', '21-30', '31-'];
     const paperFilter = document.getElementById('paperFilter');
     function getSavedPaperRange() {
       try {
         let raw = localStorage.getItem(PAPER_KEY);
-        if (raw === '1') raw = '1-1'; else if (raw === '3') raw = '1-3'; // 예전 저장값(1면만 / 1~3면) 호환
+        if (raw === '1') raw = '1-1'; // 예전 저장값 호환
         if (PAPER_RANGES.indexOf(raw) !== -1) return raw;
       } catch (e) {}
       return '1-1';
     }
     let paperRange = getSavedPaperRange();
+    // 무작위 추첨 결과는 (언론사, 범위)별로 캐시해 둠 - 접기/펼치기, 카드 순서 변경 같은
+    // 다른 동작으로 화면이 다시 그려질 때마다 기사가 뒤바뀌지 않게 하려고. 범위 버튼을 누를 때
+    // (같은 범위를 다시 눌러도), 스와이프로 범위를 넘길 때, 지면 탭에 들어올 때 새로 뽑음.
+    let paperPick = {};
     function renderPaperFilter() {
       paperFilter.hidden = currentCategory !== 'newspaper';
       Array.from(paperFilter.querySelectorAll('.paper-btn')).forEach(function (b) {
         b.classList.toggle('active', b.getAttribute('data-range') === paperRange);
       });
     }
+    function setPaperRange(range, dir) {
+      paperRange = range;
+      try { localStorage.setItem(PAPER_KEY, paperRange); } catch (e) {}
+      paperPick = {};
+      renderPaperFilter();
+      render();
+      playSlide(dir || 0);
+    }
     Array.from(paperFilter.querySelectorAll('.paper-btn')).forEach(function (b) {
-      b.addEventListener('click', function () {
-        paperRange = b.getAttribute('data-range');
-        try { localStorage.setItem(PAPER_KEY, paperRange); } catch (e) {}
-        renderPaperFilter();
-        render();
-      });
+      b.addEventListener('click', function () { setPaperRange(b.getAttribute('data-range'), 0); });
     });
+    // candidates 중 count개를 무작위로 고르되, 화면에는 원래(면) 순서대로 보여줌
+    function pickRandom(candidates, count, cacheKey) {
+      let picked = paperPick[cacheKey];
+      if (!picked) {
+        const idx = candidates.map(function (_, i) { return i; });
+        for (let i = idx.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const t = idx[i]; idx[i] = idx[j]; idx[j] = t;
+        }
+        picked = idx; // 전부 섞어서 저장해 두고, 기사 개수를 늘리면 같은 순서에서 더 가져옴
+        paperPick[cacheKey] = picked;
+      }
+      return picked.slice(0, count).sort(function (a, b) { return a - b; }).map(function (i) { return candidates[i]; });
+    }
 
     let currentOrder = applyOrder(COMMUNITY_DATA.communities, getSavedOrder());
     resetLink.addEventListener('click', function (e) { e.preventDefault(); localStorage.removeItem(STORAGE_KEY); currentOrder = COMMUNITY_DATA.communities.slice(); render(); });
@@ -573,15 +613,16 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
           if (e.target.closest('.drag-handle') || e.target.closest('.title')) return;
           if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCollapse(); }
         });
-        // 보여줄 기사 목록 결정: 지면 탭은 "면 범위" 필터(기사 개수 설정은 적용 안 함 - 면 범위가
-        // 곧 분량 조절이라서), 나머지 분야는 기존처럼 기사 개수 설정만큼 자름
+        // 보여줄 기사 목록 결정. 지면 탭: 선택한 면 범위의 기사 중, 1면은 전부 / 그 외 범위는
+        // "언론당 기사 개수"만큼 무작위로 골라서 보여줌. 나머지 분야는 기존처럼 개수만큼 자름.
         let visible = section.posts || [];
         const isPaper = currentCategory === 'newspaper';
         if (isPaper) {
-          if (paperRange !== 'all') {
-            const lohi = paperRange.split('-').map(Number); // '4-10' -> [4, 10]
-            visible = visible.filter(function (p) { return p.main && p.pageNo >= lohi[0] && p.pageNo <= lohi[1]; });
-          }
+          const parts = paperRange.split('-'); // '11-20' -> ['11','20'], '31-' -> ['31','']
+          const lo = Number(parts[0]);
+          const hi = parts[1] === '' ? Infinity : Number(parts[1]);
+          visible = visible.filter(function (p) { return p.main && p.pageNo >= lo && p.pageNo <= hi; });
+          if (paperRange !== '1-1') visible = pickRandom(visible, currentPostCount, community.name + '|' + paperRange);
         } else {
           visible = visible.slice(0, currentPostCount);
         }
@@ -592,7 +633,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
           else empty.textContent = isPaper ? '해당 면의 기사가 없습니다.' : '표시할 뉴스가 없습니다.';
           card.appendChild(empty);
         } else {
-          const list = document.createElement('ol'); list.className = 'post-list' + (isPaper && paperRange === 'all' ? ' scrolling' : '');
+          const list = document.createElement('ol'); list.className = 'post-list';
           visible.forEach(function (post, idx) {
             const li = document.createElement('li');
             // 랭킹 탭: 조회수(공개하는 언론사만). 지면 탭: 몇 면 기사인지("A1면").
