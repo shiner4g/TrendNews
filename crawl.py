@@ -259,7 +259,6 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   .post-title { flex: 1 1 auto; font-size: var(--post-size); color: var(--text); text-decoration: none; line-height: 1.4; white-space: normal; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; }
   .paper-filter { max-width: 1620px; margin: 8px auto 0; display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; }
   .paper-filter[hidden] { display: none; }
-  .paper-filter-label { font-size: 13px; color: var(--text-sub); margin-right: 2px; }
   .paper-btn { border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 12px; padding: 2px 10px; font-size: 13px; line-height: 1.4; cursor: pointer; white-space: nowrap; }
   .paper-btn:hover { border-color: var(--accent); color: var(--accent); }
   .paper-btn.active { border-color: var(--accent); color: var(--accent); font-weight: 700; }
@@ -291,9 +290,11 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   <div class="updated" id="updatedAt">불러오는 중...</div>
   <nav class="category-bar" id="categoryBar" aria-label="분야 선택"></nav>
   <div class="paper-filter" id="paperFilter" hidden>
-    <span class="paper-filter-label">면 범위</span>
-    <button type="button" class="paper-btn" data-range="1">1면만</button>
-    <button type="button" class="paper-btn" data-range="3">1~3면</button>
+    <button type="button" class="paper-btn" data-range="1-1">1면</button>
+    <button type="button" class="paper-btn" data-range="1-3">1~3</button>
+    <button type="button" class="paper-btn" data-range="4-10">4~10</button>
+    <button type="button" class="paper-btn" data-range="11-20">11~20</button>
+    <button type="button" class="paper-btn" data-range="21-30">21~30</button>
     <button type="button" class="paper-btn" data-range="all">전체</button>
   </div>
 </header>
@@ -455,10 +456,15 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
 
     // ---------- 지면 탭 전용: 몇 면까지 볼지 (1면만 / 1~3면 / 전체) ----------
     const PAPER_KEY = 'trendNewsPaperRange';
+    const PAPER_RANGES = ['1-1', '1-3', '4-10', '11-20', '21-30', 'all'];
     const paperFilter = document.getElementById('paperFilter');
     function getSavedPaperRange() {
-      try { const raw = localStorage.getItem(PAPER_KEY); if (raw === '1' || raw === '3' || raw === 'all') return raw; } catch (e) {}
-      return '1';
+      try {
+        let raw = localStorage.getItem(PAPER_KEY);
+        if (raw === '1') raw = '1-1'; else if (raw === '3') raw = '1-3'; // 예전 저장값(1면만 / 1~3면) 호환
+        if (PAPER_RANGES.indexOf(raw) !== -1) return raw;
+      } catch (e) {}
+      return '1-1';
     }
     let paperRange = getSavedPaperRange();
     function renderPaperFilter() {
@@ -572,7 +578,10 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
         let visible = section.posts || [];
         const isPaper = currentCategory === 'newspaper';
         if (isPaper) {
-          if (paperRange !== 'all') visible = visible.filter(function (p) { return p.main && p.pageNo <= Number(paperRange); });
+          if (paperRange !== 'all') {
+            const lohi = paperRange.split('-').map(Number); // '4-10' -> [4, 10]
+            visible = visible.filter(function (p) { return p.main && p.pageNo >= lohi[0] && p.pageNo <= lohi[1]; });
+          }
         } else {
           visible = visible.slice(0, currentPostCount);
         }
