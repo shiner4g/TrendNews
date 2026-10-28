@@ -147,7 +147,9 @@ def parse_newspaper(h):
     posts = []
     seen = set()
     first_sec = None
-    for block in h.split('<div class="newspaper_wrp">')[1:]:
+    # 주의: 한겨레/한국일보/매일경제/전자신문은 1면 블록만 class가 "newspaper_wrp type_main"이라서
+    # (경향/중앙은 "newspaper_wrp" 그대로) class 전체를 정확히 맞추면 1면이 통째로 빠짐.
+    for block in re.split(r'<div class="newspaper_wrp[^"]*">', h)[1:]:
         lab_m = re.search(r'<span class="page_notation"><em>([^<]*)</em>', block)
         if not lab_m:
             continue
