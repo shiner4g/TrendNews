@@ -232,7 +232,6 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   .icon-btn.text-btn { width: auto; padding: 0 10px; font-size: 13px; font-weight: 700; white-space: nowrap; }
   .top-panel { max-width: 1620px; margin: 10px auto 0; background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
   .top-panel[hidden] { display: none; }
-  .top-desc { font-size: 13px; color: var(--text-sub); margin-bottom: 8px; }
   .top-list { display: flex; flex-wrap: wrap; gap: 6px 8px; }
   .top-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 14px; padding: 4px 11px 4px 8px; font-size: 14px; line-height: 1.4; cursor: pointer; font-family: inherit; }
   .top-chip:hover { border-color: var(--accent); color: var(--accent); }
@@ -307,7 +306,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   <div class="header-top">
     <h1>TrendNews</h1>
     <div class="header-icons">
-      <button id="topBtn" type="button" class="icon-btn text-btn" title="자주 나온 키워드 Top 10" aria-label="자주 나온 키워드 Top 10" aria-expanded="false">Top 10</button>
+      <button id="topBtn" type="button" class="icon-btn text-btn" title="자주 나온 키워드 Top 12" aria-label="자주 나온 키워드 Top 12" aria-expanded="false">Top 12</button>
       <button id="searchBtn" type="button" class="icon-btn" title="뉴스 검색" aria-label="뉴스 검색" aria-expanded="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><line x1="15.5" y1="15.5" x2="21" y2="21"/></svg></button>
       <button id="collapseAll" type="button" class="icon-btn" title="모두 접기" aria-label="모두 접기">⊟</button>
       <button id="expandAll" type="button" class="icon-btn" title="모두 펼치기" aria-label="모두 펼치기">⊞</button>
@@ -881,12 +880,12 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     searchInput.addEventListener('input', runSearch);
     searchInput.addEventListener('keydown', function (e) { if (e.key === 'Escape') { e.preventDefault(); closeSearch(); } });
 
-    // ---------- Top 10 키워드: 수집된 기사 제목에서 가장 많은 기사에 나온 단어 ----------
+    // ---------- Top 12 키워드: 수집된 기사 제목에서 가장 많은 기사에 나온 단어 ----------
     // 형태소 분석기 없이 가볍게: 제목을 단어로 쪼개고 끝의 조사(는/을/에서 등)를 떼어낸 뒤,
     // 기사 수(한 기사에서 여러 번 나와도 1회)로 세어서 상위 10개를 보여줌. 누르면 그 단어로 검색함.
     const topBtn = document.getElementById('topBtn');
     const topPanel = document.getElementById('topPanel');
-    const TOP_N_KEYWORDS = 10;
+    const TOP_N_KEYWORDS = 12;
     const TOP_STOP = {};
     ('속보 단독 종합 사진 영상 포토 그래픽 카드 사설 칼럼 만평 기고 논설 시론 독자 부고 인사 운세 날씨 오늘 내일 어제 이번 지난 올해 내년 지난해 지난달 이달 이날 이후 이전 전날 현재 오전 오후 최근 모두 다시 이미 가장 계속 관련 대한 위해 통해 대해 따라 대신 때문 가운데 이상 이하 이내 앞서 한편 우리 지금 여기 하루 이틀 주말 한때 뉴스 기자 오늘의 만에 시대 이유 공개 전환 지원 개발 확대 강화 추진 발표 계획 가능 필요 사실 결과 상황 문제 방안 세계 the and for with from').split(' ').forEach(function (w) { TOP_STOP[w] = true; });
     const JOSA_STRONG = ['에서', '에게', '으로', '까지', '부터', '이라', '라고', '에는', '에도', '에만', '보다', '처럼', '한테', '은', '는', '을', '를'];
@@ -958,10 +957,6 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     function renderTopPanel() {
       const top = computeTopKeywords();
       topPanel.innerHTML = '';
-      const desc = document.createElement('div');
-      desc.className = 'top-desc';
-      desc.textContent = '스크랩된 기사에서 가장 많이 나온 키워드 (기사 수) · 누르면 해당 단어가 나온 기사만 보여줍니다';
-      topPanel.appendChild(desc);
       const list = document.createElement('div');
       list.className = 'top-list';
       top.forEach(function (k, i) {
