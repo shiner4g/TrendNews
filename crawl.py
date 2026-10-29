@@ -953,9 +953,16 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
         chips[i].classList.toggle('active', cur !== '' && chips[i].getAttribute('data-word') === cur);
       }
     }
+    // 키워드를 누르면 검색창을 띄우지 않고(모바일에서 키보드가 올라와 기사를 가리므로) 결과만 보여줌.
+    // 선택 중인 키워드를 다시 누르면 해제되어 원래 화면으로 돌아감.
     function pickKeyword(word) {
-      searchInput.value = word;
-      if (searchBar.hidden) openSearch(); else runSearch();
+      if (searchInput.value.trim().toLowerCase() === word) {
+        searchInput.value = '';
+        hideResults();
+      } else {
+        searchInput.value = word;
+        runSearch();
+      }
       markTopActive();
     }
     function renderTopPanel() {
@@ -980,7 +987,13 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
       topPanel.hidden = !show;
       topBtn.classList.toggle('active', show);
       topBtn.setAttribute('aria-expanded', show ? 'true' : 'false');
-      if (show) renderTopPanel();
+      if (show) {
+        renderTopPanel();
+      } else if (searchBar.hidden && searchInput.value !== '') {
+        // 키워드로 보던 결과는 패널을 닫으면 함께 닫음 (검색창이 없어서 따로 닫을 방법이 없으므로)
+        searchInput.value = '';
+        hideResults();
+      }
     });
     searchInput.addEventListener('input', markTopActive);
 
