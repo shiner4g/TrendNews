@@ -831,7 +831,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
       const head = document.createElement('div');
       head.className = 'card-header search-head';
       head.innerHTML = '<span class="title">검색 결과</span><span class="board">' + items.length + '건' + (items.length > SEARCH_MAX ? ' (상위 ' + SEARCH_MAX + '건만 표시)' : '') + '</span>';
-      card.appendChild(head);
+      if (!searchBar.hidden) card.appendChild(head); // 키워드로 볼 때(검색창 없음)는 '검색 결과' 머리줄을 생략
       if (items.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'empty-note';
