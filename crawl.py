@@ -306,7 +306,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   <div class="header-top">
     <h1>TrendNews</h1>
     <div class="header-icons">
-      <button id="topBtn" type="button" class="icon-btn text-btn" title="자주 나온 키워드 Top 12" aria-label="자주 나온 키워드 Top 12" aria-expanded="false">Top 12</button>
+      <button id="topBtn" type="button" class="icon-btn text-btn" title="자주 나온 키워드 Top 10" aria-label="자주 나온 키워드 Top 10" aria-expanded="false">Top 10</button>
       <button id="searchBtn" type="button" class="icon-btn" title="뉴스 검색" aria-label="뉴스 검색" aria-expanded="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><line x1="15.5" y1="15.5" x2="21" y2="21"/></svg></button>
       <button id="collapseAll" type="button" class="icon-btn" title="모두 접기" aria-label="모두 접기">⊟</button>
       <button id="expandAll" type="button" class="icon-btn" title="모두 펼치기" aria-label="모두 펼치기">⊞</button>
@@ -880,14 +880,15 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     searchInput.addEventListener('input', runSearch);
     searchInput.addEventListener('keydown', function (e) { if (e.key === 'Escape') { e.preventDefault(); closeSearch(); } });
 
-    // ---------- Top 12 키워드: 수집된 기사 제목에서 가장 많은 기사에 나온 단어 ----------
+    // ---------- Top 10 키워드: 지금 여러 언론이 함께 다루는 단어 ----------
     // 형태소 분석기 없이 가볍게: 제목을 단어로 쪼개고 끝의 조사(는/을/에서 등)를 떼어낸 뒤,
-    // 기사 수(한 기사에서 여러 번 나와도 1회)로 세어서 상위 10개를 보여줌. 누르면 그 단어로 검색함.
+    // 그 단어가 나온 언론사 수(많을수록 위) -> 기사 수 순으로 상위 10개를 보여줌. 누르면 그 단어로 검색함.
+    // 한국/미국/대통령/삼성처럼 언제나 나오는 뻔한 단어는 TOP_STOP에 넣어 제외함 (더 빼고 싶으면 여기에 추가).
     const topBtn = document.getElementById('topBtn');
     const topPanel = document.getElementById('topPanel');
-    const TOP_N_KEYWORDS = 12;
+    const TOP_N_KEYWORDS = 10;
     const TOP_STOP = {};
-    ('속보 단독 종합 사진 영상 포토 그래픽 카드 사설 칼럼 만평 기고 논설 시론 독자 부고 인사 운세 날씨 오늘 내일 어제 이번 지난 올해 내년 지난해 지난달 이달 이날 이후 이전 전날 현재 오전 오후 최근 모두 다시 이미 가장 계속 관련 대한 위해 통해 대해 따라 대신 때문 가운데 이상 이하 이내 앞서 한편 우리 지금 여기 하루 이틀 주말 한때 뉴스 기자 오늘의 만에 시대 이유 공개 전환 지원 개발 확대 강화 추진 발표 계획 가능 필요 사실 결과 상황 문제 방안 세계 the and for with from').split(' ').forEach(function (w) { TOP_STOP[w] = true; });
+    ('속보 단독 종합 사진 영상 포토 그래픽 카드 사설 칼럼 만평 기고 논설 시론 독자 부고 인사 운세 날씨 오늘 내일 어제 이번 지난 올해 내년 지난해 지난달 이달 이날 이후 이전 전날 현재 오전 오후 최근 모두 다시 이미 가장 계속 관련 대한 위해 통해 대해 따라 대신 때문 가운데 이상 이하 이내 앞서 한편 우리 지금 여기 하루 이틀 주말 한때 뉴스 기자 오늘의 만에 시대 이유 공개 전환 지원 개발 확대 강화 추진 발표 계획 가능 필요 사실 결과 상황 문제 방안 세계 ai 인공지능 대통령 한국 삼성 삼성전자 정보 서울 미국 중국 일본 정부 국민 기업 시장 경제 사회 정치 국내 해외 글로벌 전국 가능성 사람 역대 논란 피해 최초 최대 최고 전망 예정 우려 영향 규모 현장 발생 the and for with from').split(' ').forEach(function (w) { TOP_STOP[w] = true; });
     const JOSA_STRONG = ['에서', '에게', '으로', '까지', '부터', '이라', '라고', '에는', '에도', '에만', '보다', '처럼', '한테', '은', '는', '을', '를'];
     const JOSA_WEAK = ['의', '가', '도', '이', '로', '과', '와', '만', '에'];
     const VERB_END = ['다', '하며', '하고', '하는', '하게', '해야', '으며', '했던', '하던'];
@@ -932,14 +933,16 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
           df[stem] = (df[stem] || 0) + 1;
         });
       });
-      const cands = Object.keys(df).filter(function (w) { return df[w] >= 2; }).sort(function (a, b) { return df[b] - df[a]; }).slice(0, 40);
-      // 검색 결과 건수와 일치하도록, 최종 건수는 검색과 같은 방식(제목에 단어가 포함된 기사 수)으로 다시 셈
+      const cands = Object.keys(df).filter(function (w) { return df[w] >= 2; }).sort(function (a, b) { return df[b] - df[a]; }).slice(0, 80);
+      // 검색 결과 건수와 일치하도록, 최종 건수는 검색과 같은 방식(제목에 단어가 포함된 기사 수)으로 다시 셈.
+      // 한 언론만 계속 쓰는 단어보다 여러 언론이 함께 다루는 단어가 '지금 뜨는' 이슈이므로 언론사 수를 먼저 봄.
       const out = cands.map(function (w) {
         let n = 0;
-        items.forEach(function (it) { if (it.hay.indexOf(w) !== -1) n++; });
-        return { word: w, count: n };
-      });
-      out.sort(function (a, b) { return b.count - a.count || b.word.length - a.word.length; });
+        const outlets = {};
+        items.forEach(function (it) { if (it.hay.indexOf(w) !== -1) { n++; outlets[it.outlet] = true; } });
+        return { word: w, count: n, outlets: Object.keys(outlets).length };
+      }).filter(function (k) { return k.outlets >= 2; });
+      out.sort(function (a, b) { return b.outlets - a.outlets || b.count - a.count || b.word.length - a.word.length; });
       return out.slice(0, TOP_N_KEYWORDS);
     }
     function markTopActive() {
