@@ -250,7 +250,8 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   .search-results[hidden], .grid[hidden], .category-bar[hidden] { display: none; }
   .search-head { cursor: default; }
   .search-head:hover { background: color-mix(in srgb, var(--card-bg) 92%, var(--text)); }
-  .sr-src { flex: 0 0 auto; max-width: 40%; font-size: 12px; line-height: 1.5; color: var(--text-sub); }
+  .sr-src { flex: 0 0 auto; max-width: 32%; display: flex; flex-direction: column; font-size: 12px; line-height: 1.4; color: var(--text-sub); }
+  .sr-outlet { font-weight: 700; color: var(--text); }
   .post-title mark { background: color-mix(in srgb, var(--accent) 28%, transparent); color: inherit; border-radius: 2px; padding: 0 1px; }
   .category-bar { max-width: 1620px; margin: 12px auto 0; display: flex; flex-direction: column; gap: 5px; }
   .category-row { display: flex; flex-wrap: wrap; gap: 5px 10px; }
@@ -842,7 +843,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
         items.slice(0, SEARCH_MAX).forEach(function (it) {
           const li = document.createElement('li');
           const badge = searchBadge(it.post, it.catKey);
-          li.innerHTML = '<span class="sr-src">' + escapeHtml(it.outlet + ' · ' + it.cats.join('/')) + '</span>' +
+          li.innerHTML = '<span class="sr-src"><span class="sr-outlet">' + escapeHtml(it.outlet) + '</span><span class="sr-cats">' + escapeHtml(it.cats.join(' / ')) + '</span></span>' +
             '<a class="post-title" href="' + escapeAttr(it.post.url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeAttr(it.post.title) + '">' + highlight(String(it.post.title || ''), terms) + '</a>' +
             (badge !== '' ? '<span class="views">' + escapeHtml(badge) + '</span>' : '');
           list.appendChild(li);
