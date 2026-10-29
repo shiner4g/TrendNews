@@ -228,6 +228,19 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   .icon-btn { border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 6px; width: 34px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; line-height: 1; cursor: pointer; }
   .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
   .updated { font-size: 15px; color: var(--text-sub); text-align: center; margin-top: 8px; }
+  .icon-btn.active { border-color: var(--accent); color: var(--accent); }
+  .search-bar { max-width: 1620px; margin: 10px auto 0; display: flex; align-items: center; gap: 8px; }
+  .search-bar[hidden] { display: none; }
+  .search-bar input { flex: 1 1 auto; min-width: 0; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 8px; padding: 8px 12px; font-size: 16px; font-family: inherit; }
+  .search-bar input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+  .search-close { flex: 0 0 auto; border: 1px solid var(--border); background: var(--card-bg); color: var(--text-sub); border-radius: 8px; width: 36px; height: 36px; font-size: 15px; cursor: pointer; }
+  .search-close:hover { border-color: var(--accent); color: var(--accent); }
+  .search-results { max-width: 1620px; margin: 16px auto 0; }
+  .search-results[hidden], .grid[hidden], .category-bar[hidden] { display: none; }
+  .search-head { cursor: default; }
+  .search-head:hover { background: color-mix(in srgb, var(--card-bg) 92%, var(--text)); }
+  .sr-src { flex: 0 0 auto; max-width: 40%; font-size: 12px; line-height: 1.5; color: var(--text-sub); }
+  .post-title mark { background: color-mix(in srgb, var(--accent) 28%, transparent); color: inherit; border-radius: 2px; padding: 0 1px; }
   .category-bar { max-width: 1620px; margin: 12px auto 0; display: flex; flex-direction: column; gap: 5px; }
   .category-row { display: flex; flex-wrap: wrap; gap: 5px 10px; }
   .category-btn { flex: 0 0 auto; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 12px; padding: 3px 10px; font-size: 14px; line-height: 1.4; cursor: pointer; white-space: nowrap; }
@@ -282,11 +295,16 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   <div class="header-top">
     <h1>TrendNews</h1>
     <div class="header-icons">
+      <button id="searchBtn" type="button" class="icon-btn" title="뉴스 검색" aria-label="뉴스 검색" aria-expanded="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><line x1="15.5" y1="15.5" x2="21" y2="21"/></svg></button>
       <button id="collapseAll" type="button" class="icon-btn" title="모두 접기" aria-label="모두 접기">⊟</button>
       <button id="expandAll" type="button" class="icon-btn" title="모두 펼치기" aria-label="모두 펼치기">⊞</button>
     </div>
   </div>
   <div class="updated" id="updatedAt">불러오는 중...</div>
+  <div class="search-bar" id="searchBar" hidden>
+    <input type="search" id="searchInput" placeholder="스크랩된 뉴스에서 검색 (띄어쓰기로 여러 단어)" autocomplete="off" enterkeyhint="search" aria-label="뉴스 검색">
+    <button type="button" id="searchClose" class="search-close" aria-label="검색 닫기" title="검색 닫기">✕</button>
+  </div>
   <nav class="category-bar" id="categoryBar" aria-label="분야 선택"></nav>
   <div class="paper-filter" id="paperFilter" hidden>
     <button type="button" class="paper-btn" data-range="1-1">1면</button>
@@ -296,6 +314,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     <button type="button" class="paper-btn" data-range="31-">31~</button>
   </div>
 </header>
+<div class="search-results" id="searchResults" hidden></div>
 <div class="grid" id="grid"></div>
 <footer>
   <div class="controls">
@@ -437,6 +456,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
       playSlide(dir);
     }
     function stepCategory(delta) {
+      if (!searchResults.hidden) return false; // 검색 결과를 보는 중에는 분야 이동(스와이프/키)을 하지 않음
       // 지면 탭 안에서는 좌우 이동이 "다음/이전 면 범위"(1면 → 1~10 → 11~20 → 21~30 → 31~)이고,
       // 맨 끝(31~)을 넘어가면 다음 분야(랭킹), 맨 앞(1면) 이전으로 가면 이전 분야(칼럼)로 넘어감.
       if (currentCategory === 'newspaper') {
@@ -661,7 +681,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     let swipeStart = null;
     function isSwipeBlocked(target) {
       if (!target || !target.closest) return false;
-      if (target.closest('#categoryBar') || target.closest('#paperFilter') || target.closest('.drag-handle') || target.closest('.font-controls') || target.closest('.count-controls')) return true;
+      if (target.closest('#categoryBar') || target.closest('#paperFilter') || target.closest('#searchBar') || target.closest('.drag-handle') || target.closest('.font-controls') || target.closest('.count-controls')) return true;
       for (let el = target; el && el !== document.body; el = el.parentElement) {
         if (el.scrollWidth > el.clientWidth + 1) {
           const ox = getComputedStyle(el).overflowX;
@@ -713,6 +733,138 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
       stepCategory(e.key === 'ArrowRight' ? 1 : -1);
     });
+
+    // ---------- 뉴스 검색: 이미 수집해 둔 기사(이 페이지에 들어있는 데이터) 안에서만 찾음 ----------
+    // 모든 언론사 x 모든 분야(주요뉴스~랭킹, 지면 포함)의 기사 제목을 대상으로 하고,
+    // 띄어쓰기로 나눈 단어가 전부 들어있는 기사만 보여줌(대소문자 구분 없음).
+    // 같은 기사가 여러 분야/지면에 중복으로 있으면 한 번만 보여주고 분야는 함께 표시함.
+    const searchBtn = document.getElementById('searchBtn');
+    const searchBar = document.getElementById('searchBar');
+    const searchInput = document.getElementById('searchInput');
+    const searchClose = document.getElementById('searchClose');
+    const searchResults = document.getElementById('searchResults');
+    const SEARCH_MAX = 300;
+    function hasMetric(p) { return p.comments != null || p.views != null; }
+    function buildSearchIndex() {
+      const byKey = {};
+      const list = [];
+      currentOrder.forEach(function (community) {
+        const secs = community.sections || {};
+        CATEGORIES.forEach(function (c) {
+          const sec = secs[c[0]];
+          if (!sec || !sec.posts) return;
+          sec.posts.forEach(function (post) {
+            const title = String(post.title || '');
+            const key = community.name + '|' + title.split(' ').join('').toLowerCase();
+            let item = byKey[key];
+            if (!item) {
+              item = { outlet: community.name, cats: [], post: post, catKey: c[0], hay: title.toLowerCase() };
+              byKey[key] = item;
+              list.push(item);
+            } else if (hasMetric(post) && !hasMetric(item.post)) {
+              item.post = post; // 댓글 수/조회수가 있는 쪽 정보를 대표로 씀
+              item.catKey = c[0];
+            }
+            if (item.cats.indexOf(c[1]) === -1) item.cats.push(c[1]);
+          });
+        });
+      });
+      return list;
+    }
+    function searchBadge(post, catKey) {
+      if (catKey === 'ranking') return post.views != null ? String(post.views) : '';
+      if (catKey === 'newspaper') return post.page ? post.page + '면' : '';
+      if (post.comments != null) return String(post.comments);
+      return post.time || '';
+    }
+    function highlight(text, terms) {
+      const lower = text.toLowerCase();
+      const marks = [];
+      terms.forEach(function (t) {
+        let i = 0;
+        while ((i = lower.indexOf(t, i)) !== -1) { marks.push([i, i + t.length]); i += t.length; }
+      });
+      marks.sort(function (a, b) { return a[0] - b[0]; });
+      const merged = [];
+      marks.forEach(function (m) {
+        const last = merged[merged.length - 1];
+        if (last && m[0] <= last[1]) last[1] = Math.max(last[1], m[1]);
+        else merged.push([m[0], m[1]]);
+      });
+      let out = '';
+      let pos = 0;
+      merged.forEach(function (m) {
+        out += escapeHtml(text.slice(pos, m[0])) + '<mark>' + escapeHtml(text.slice(m[0], m[1])) + '</mark>';
+        pos = m[1];
+      });
+      return out + escapeHtml(text.slice(pos));
+    }
+    function hideResults() {
+      searchResults.hidden = true;
+      searchResults.innerHTML = '';
+      grid.hidden = false;
+      categoryBar.hidden = false;
+      renderPaperFilter();
+    }
+    function showResults(items, terms, query) {
+      grid.hidden = true;
+      categoryBar.hidden = true;
+      paperFilter.hidden = true;
+      searchResults.hidden = false;
+      searchResults.innerHTML = '';
+      const card = document.createElement('div');
+      card.className = 'card';
+      const head = document.createElement('div');
+      head.className = 'card-header search-head';
+      head.innerHTML = '<span class="title">검색 결과</span><span class="board">' + items.length + '건' + (items.length > SEARCH_MAX ? ' (상위 ' + SEARCH_MAX + '건만 표시)' : '') + '</span>';
+      card.appendChild(head);
+      if (items.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-note';
+        empty.textContent = "'" + query + "'에 해당하는 기사가 없습니다. (이미 수집된 기사 안에서만 검색합니다)";
+        card.appendChild(empty);
+      } else {
+        const list = document.createElement('ol');
+        list.className = 'post-list';
+        items.slice(0, SEARCH_MAX).forEach(function (it) {
+          const li = document.createElement('li');
+          const badge = searchBadge(it.post, it.catKey);
+          li.innerHTML = '<span class="sr-src">' + escapeHtml(it.outlet + ' · ' + it.cats.join('/')) + '</span>' +
+            '<a class="post-title" href="' + escapeAttr(it.post.url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeAttr(it.post.title) + '">' + highlight(String(it.post.title || ''), terms) + '</a>' +
+            (badge !== '' ? '<span class="views">' + escapeHtml(badge) + '</span>' : '');
+          list.appendChild(li);
+        });
+        card.appendChild(list);
+      }
+      searchResults.appendChild(card);
+    }
+    function runSearch() {
+      const q = searchInput.value.trim();
+      if (!q) { hideResults(); return; }
+      const terms = q.toLowerCase().split(' ').filter(function (t) { return t !== ''; });
+      const items = buildSearchIndex().filter(function (it) {
+        return terms.every(function (t) { return it.hay.indexOf(t) !== -1; });
+      });
+      showResults(items, terms, q);
+    }
+    function openSearch() {
+      searchBar.hidden = false;
+      searchBtn.classList.add('active');
+      searchBtn.setAttribute('aria-expanded', 'true');
+      searchInput.focus();
+      runSearch();
+    }
+    function closeSearch() {
+      searchBar.hidden = true;
+      searchBtn.classList.remove('active');
+      searchBtn.setAttribute('aria-expanded', 'false');
+      searchInput.value = '';
+      hideResults();
+    }
+    searchBtn.addEventListener('click', function () { if (searchBar.hidden) openSearch(); else closeSearch(); });
+    searchClose.addEventListener('click', closeSearch);
+    searchInput.addEventListener('input', runSearch);
+    searchInput.addEventListener('keydown', function (e) { if (e.key === 'Escape') { e.preventDefault(); closeSearch(); } });
 
     renderCategoryBar();
     render();
