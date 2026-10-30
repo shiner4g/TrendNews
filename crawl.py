@@ -843,7 +843,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
         items.slice(0, SEARCH_MAX).forEach(function (it) {
           const li = document.createElement('li');
           const badge = searchBadge(it.post, it.catKey);
-          li.innerHTML = '<span class="sr-src"><span class="sr-outlet">' + escapeHtml(it.outlet) + '</span>' + (searchBar.hidden ? '' : '<span class="sr-cats">' + escapeHtml(it.cats[0]) + '</span>') + '</span>' +
+          li.innerHTML = '<span class="sr-src"><span class="sr-outlet">' + escapeHtml(it.outlet) + '</span><span class="sr-cats">' + escapeHtml(it.cats[0]) + '</span></span>' +
             '<a class="post-title" href="' + escapeAttr(it.post.url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeAttr(it.post.title) + '">' + highlight(String(it.post.title || ''), terms) + '</a>' +
             (badge !== '' ? '<span class="views">' + escapeHtml(badge) + '</span>' : '');
           list.appendChild(li);
@@ -890,6 +890,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     const TOP_N_KEYWORDS = 10;
     const TOP_STOP = {};
     ('속보 단독 종합 사진 영상 포토 그래픽 카드 사설 칼럼 만평 기고 논설 시론 독자 부고 인사 운세 날씨 오늘 내일 어제 이번 지난 올해 내년 지난해 지난달 이달 이날 이후 이전 전날 현재 오전 오후 최근 모두 다시 이미 가장 계속 관련 대한 위해 통해 대해 따라 대신 때문 가운데 이상 이하 이내 앞서 한편 우리 지금 여기 하루 이틀 주말 한때 뉴스 기자 오늘의 만에 시대 이유 공개 전환 지원 개발 확대 강화 추진 발표 계획 가능 필요 사실 결과 상황 문제 방안 세계 ai 인공지능 대통령 한국 삼성 삼성전자 정보 서울 미국 중국 일본 정부 국민 기업 시장 경제 사회 정치 국내 해외 글로벌 전국 가능성 사람 역대 논란 피해 최초 최대 최고 전망 예정 우려 영향 규모 현장 발생 the and for with from').split(' ').forEach(function (w) { TOP_STOP[w] = true; });
+    CATEGORIES.forEach(function (c) { TOP_STOP[c[1].toLowerCase()] = true; }); // 분야 이름(주요뉴스/정치/지면/랭킹 등)은 키워드에서 제외
     const JOSA_STRONG = ['에서', '에게', '으로', '까지', '부터', '이라', '라고', '에는', '에도', '에만', '보다', '처럼', '한테', '은', '는', '을', '를'];
     const JOSA_WEAK = ['의', '가', '도', '이', '로', '과', '와', '만', '에'];
     const VERB_END = ['다', '하며', '하고', '하는', '하게', '해야', '으며', '했던', '하던'];
