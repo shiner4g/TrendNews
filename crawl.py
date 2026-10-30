@@ -843,7 +843,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
         items.slice(0, SEARCH_MAX).forEach(function (it) {
           const li = document.createElement('li');
           const badge = searchBadge(it.post, it.catKey);
-          li.innerHTML = '<span class="sr-src"><span class="sr-outlet">' + escapeHtml(it.outlet) + '</span><span class="sr-cats">' + escapeHtml(it.cats[0]) + '</span></span>' +
+          li.innerHTML = '<span class="sr-src"><span class="sr-outlet">' + escapeHtml(it.outlet) + '</span>' + (searchBar.hidden ? '' : '<span class="sr-cats">' + escapeHtml(it.cats[0]) + '</span>') + '</span>' +
             '<a class="post-title" href="' + escapeAttr(it.post.url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeAttr(it.post.title) + '">' + highlight(String(it.post.title || ''), terms) + '</a>' +
             (badge !== '' ? '<span class="views">' + escapeHtml(badge) + '</span>' : '');
           list.appendChild(li);
