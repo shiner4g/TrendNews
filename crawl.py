@@ -915,8 +915,24 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
       }
       return tok;
     }
+    // 최근 몇 회분의 기사 제목(crawl.py가 history로 보관)을 '평소 수준'으로 삼아, 지금 평소보다
+    // 갑자기 많이 나온 단어를 위로 올림. 이력이 없으면(첫 실행 직후) 언론사 수 -> 기사 수 순으로 정함.
+    function loadBaseline() {
+      const hist = COMMUNITY_DATA.history || [];
+      const snaps = [];
+      hist.forEach(function (h) {
+        if (!h || h.t === COMMUNITY_DATA.generatedAt || !h.a) return;
+        snaps.push(h.a.map(function (x) { return String(x[1] || '').toLowerCase(); }));
+      });
+      return snaps;
+    }
     function computeTopKeywords() {
-      const items = buildSearchIndex();
+      // 지면은 하루 종일 거의 안 바뀌는 데다 양이 많아서 '지금 뜨는' 단어를 가리므로 집계에서 뺌
+      const paperLabel = (CATEGORIES.filter(function (c) { return c[0] === 'newspaper'; })[0] || ['', ''])[1];
+      const items = buildSearchIndex().filter(function (it) {
+        return it.cats.some(function (l) { return l !== paperLabel; });
+      });
+      const baseline = loadBaseline();
       const rawSet = {};
       const wordLists = items.map(function (it) {
         const words = splitWords(it.hay);
@@ -935,16 +951,27 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
           df[stem] = (df[stem] || 0) + 1;
         });
       });
-      const cands = Object.keys(df).filter(function (w) { return df[w] >= 2; }).sort(function (a, b) { return df[b] - df[a]; }).slice(0, 80);
-      // 검색 결과 건수와 일치하도록, 최종 건수는 검색과 같은 방식(제목에 단어가 포함된 기사 수)으로 다시 셈.
-      // 한 언론만 계속 쓰는 단어보다 여러 언론이 함께 다루는 단어가 '지금 뜨는' 이슈이므로 언론사 수를 먼저 봄.
+      const cands = Object.keys(df).filter(function (w) { return df[w] >= 2; }).sort(function (a, b) { return df[b] - df[a]; }).slice(0, 200);
+      // 최종 건수는 검색과 같은 방식(제목에 단어가 포함된 기사 수)으로 다시 셈.
       const out = cands.map(function (w) {
         let n = 0;
         const outlets = {};
         items.forEach(function (it) { if (it.hay.indexOf(w) !== -1) { n++; outlets[it.outlet] = true; } });
-        return { word: w, count: n, outlets: Object.keys(outlets).length };
+        let base = 0;
+        if (baseline.length > 0) {
+          baseline.forEach(function (titles) {
+            let c = 0;
+            titles.forEach(function (t) { if (t.indexOf(w) !== -1) c++; });
+            base += c;
+          });
+          base /= baseline.length;
+        }
+        return { word: w, count: n, outlets: Object.keys(outlets).length, surge: n - base };
       }).filter(function (k) { return k.outlets >= 2; });
-      out.sort(function (a, b) { return b.outlets - a.outlets || b.count - a.count || b.word.length - a.word.length; });
+      const hasBase = baseline.length > 0;
+      out.sort(function (a, b) {
+        return (hasBase ? b.surge - a.surge : 0) || b.outlets - a.outlets || b.count - a.count || b.word.length - a.word.length;
+      });
       return out.slice(0, TOP_N_KEYWORDS);
     }
     function markTopActive() {
@@ -1029,6 +1056,43 @@ def load_prev_data():
         return prev
     except Exception:
         return {}
+
+
+HISTORY_KEEP = 8  # Top 10 키워드의 "급상승" 계산용으로 최근 몇 회분의 기사 제목을 index.html에 보관할지
+
+
+def load_prev_history():
+    """직전 index.html에 들어있던 history(회차별 기사 제목 모음)를 읽어옴. 실패하면 빈 목록."""
+    if not os.path.exists(OUT_PATH):
+        return []
+    try:
+        with open(OUT_PATH, "r", encoding="utf-8") as f:
+            content = f.read()
+        m = re.search(r"const COMMUNITY_DATA = (\{.*?\});", content, re.S)
+        if not m:
+            return []
+        hist = json.loads(m.group(1)).get("history") or []
+        return [h for h in hist if isinstance(h, dict) and h.get("a")]
+    except Exception:
+        return []
+
+
+def make_snapshot(result):
+    """이번 회차의 [언론, 제목] 목록 (지면 제외, 같은 언론의 같은 제목은 1번만)."""
+    seen = set()
+    items = []
+    for c in result["communities"]:
+        for key, sec in c["sections"].items():
+            if key == "newspaper":
+                continue
+            for p in sec.get("posts") or []:
+                title = p.get("title") or ""
+                k = (c["name"], "".join(title.split()))
+                if not title or k in seen:
+                    continue
+                seen.add(k)
+                items.append([c["name"], title])
+    return {"t": result["generatedAt"], "a": items}
 
 
 def crawl_section(key, press_id, tabs, home_html):
@@ -1169,6 +1233,13 @@ def main():
                 sections[key] = {"posts": v[:TOP_N], "error": None}
 
         result["communities"].append({"name": name, "pressId": press_id, "sections": sections})
+
+    try:
+        history = load_prev_history()
+        history.append(make_snapshot(result))
+        result["history"] = history[-HISTORY_KEEP:]
+    except Exception as e:
+        print(f"[warn] history failed: {e}")
 
     data_json = json.dumps(result, ensure_ascii=False)
     page = PAGE_TEMPLATE.replace("__DATA_JSON__", data_json)
